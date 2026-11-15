@@ -145,6 +145,10 @@ def indicateur_couche(nom, c, communes, dossier):
     ext = ext_reelle(f, ext)
     brut = lire_couche(f, c, ext)
     log(f"  colonnes : {[k for k in brut.columns if k != 'geometry'][:15]}")
+    for motif in c.get("diag", ()):  # modalites d'une colonne (pour regler un filtre)
+        col = next((k for k in brut.columns if re.search(motif, str(k), re.I)), None)
+        if col:
+            log(f"  {col} : {brut[col].astype(str).value_counts().head(12).to_dict()}")
     g = filtrer(brut, c.get("filtre"))
     if c.get("mode") == "longueur":  # lignes uniquement ; a defaut (surfaces), on mesure le contour
         lignes = g[g.geom_type.astype(str).str.contains("Line", na=False)]
