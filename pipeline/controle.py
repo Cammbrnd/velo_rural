@@ -61,23 +61,23 @@ def rapport_controle(table, pop):
         "%renseigne": (r.notna().mean() * 100).round(0).values,
         "%a_0": ((r == 0).sum() / r.notna().sum() * 100).round(0).values,
         "moy": r.mean().round(1).values, "p10": r.quantile(.1).round(0).values, "p50": r.quantile(.5).round(0).values,
-        "p90": r.quantile(.9).round(0).values, "corr_logpop": [round(r[c].corr(lp, method="spearman"), 2) for c in cols],
+        "p90": r.quantile(.9).round(0).values, "corr_logpop": [round(r[c].rank().corr(lp.rank()), 2) for c in cols],
     }, index=cols)
     out += ["### Couverture et distribution (echelle percentile nationale, communes rurales)", md(q), ""]
-    out += ["### Correlations de rang entre indicateurs (rurales)", md(r.corr(method="spearman").round(2)), ""]
+    out += ["### Correlations de rang entre indicateurs (rurales)", md(r.rank().corr().round(2)), ""]
     g, sa = score_global(rural, ind, axes)
     ax = pd.DataFrame({"p10": sa.quantile(.1), "p50": sa.quantile(.5), "p90": sa.quantile(.9), "%renseigne": sa.notna().mean() * 100}).round(1)
     out += ["### Scores d'axe (poids par defaut)", md(ax), "", "Correlations de rang entre axes et score global :",
-            md(pd.concat([sa, g.rename("global")], axis=1).corr(method="spearman").round(2)), ""]
-    sens = {"poids egaux": score_global(rural, ind, axes, {k: 1 for k in ind}, {a: 1 for a in axes})[0].corr(g, method="spearman")}
+            md(pd.concat([sa, g.rename("global")], axis=1).rank().corr().round(2)), ""]
+    sens = {"poids egaux": score_global(rural, ind, axes, {k: 1 for k in ind}, {a: 1 for a in axes})[0].rank().corr(g.rank())}
     for c in cols:
         w = {k: (0 if k == c else v[1]) for k, v in ind.items()}
-        sens[f"sans {c}"] = score_global(rural, ind, axes, w)[0].corr(g, method="spearman")
+        sens[f"sans {c}"] = score_global(rural, ind, axes, w)[0].rank().corr(g.rank())
     for a in axes:
-        sens[f"sans axe {a}"] = score_global(rural, ind, axes, None, {k: (0 if k == a else v) for k, v in axes.items()})[0].corr(g, method="spearman")
+        sens[f"sans axe {a}"] = score_global(rural, ind, axes, None, {k: (0 if k == a else v) for k, v in axes.items()})[0].rank().corr(g.rank())
     s = pd.Series(sens).round(3).sort_values().rename("rho_vs_defaut")
     out += ["### Sensibilite : correlation de rang du score global avec la variante (bas = indicateur influent)", md(s.to_frame()), ""]
-    imp = pd.Series({c: round(r[c].corr(g, method="spearman"), 2) for c in cols}, name="rho_avec_score_global").sort_values()
+    imp = pd.Series({c: round(r[c].rank().corr(g.rank()), 2) for c in cols}, name="rho_avec_score_global").sort_values()
     out += ["### Lien de chaque indicateur avec le score global", md(imp.to_frame()), ""]
     n = r.notna().sum(axis=1).value_counts().sort_index()
     out += ["### Nombre d'indicateurs renseignes par commune rurale", md(n.rename("communes").to_frame()), ""]
