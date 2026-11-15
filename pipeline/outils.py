@@ -34,7 +34,7 @@ def lister_datasets_org(org_id):
         page += 1
 
 
-def choisir_ressource(dataset_id, ressource=None, formats=("csv",), plus_grosse=False):
+def choisir_ressource(dataset_id, ressource=None, formats=("csv", "csv.gz"), plus_grosse=False):
     """Premiere ressource dont le format est dans `formats` (et dont le titre correspond a `ressource`).
     Les dictionnaires de champs et jeux retires sont ignores ; `plus_grosse` prend la plus volumineuse."""
     d = api_get(f"{API}/datasets/{dataset_id}/")
@@ -76,13 +76,27 @@ def telecharger(url, dest):
 
 
 def lire_csv(chemin):
-    """Lecture tolerante : separateur detecte, encodage utf-8 puis latin-1, tout en texte."""
+    """Lecture tolerante : separateur detecte, encodage utf-8 puis latin-1, tout en texte. Gzip detecte par ses octets magiques."""
+    with open(chemin, "rb") as f:
+        gz = f.read(2) == b"\x1f\x8b"
     for enc in ("utf-8-sig", "latin-1"):
         try:
-            return pd.read_csv(chemin, sep=None, engine="python", dtype=str, encoding=enc)
+            return pd.read_csv(chemin, sep=None, engine="python", dtype=str, encoding=enc, compression="gzip" if gz else None)
         except UnicodeDecodeError:
             continue
     raise RuntimeError(f"encodage illisible : {chemin}")
+
+
+def borne_haute_km(libelle):
+    """Borne haute (km) d'une classe de distance : 'Moins de 1 km' -> 1 ; '2 a moins de 5 km' -> 5 ; '20 km ou plus' -> None."""
+    t = str(libelle).lower().replace(",", ".")
+    nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", t)]
+    if not nums or re.search(r"\bplus\b", t) and "moins" not in t:
+        return None
+    if len(nums) == 1 and "moins" not in t:
+        return None
+    n = max(nums)
+    return n / 1000 if re.search(r"\d\s*m\b", t) and "km" not in t else n
 
 
 def trouver_col(df, regex, quoi):

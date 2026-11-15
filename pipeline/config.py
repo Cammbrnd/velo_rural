@@ -33,10 +33,8 @@ INDICATEURS_TBMD = {
     "i_compacite": dict(dataset=r"Densit[ée] de population", valeur=r"densit", transfo="haut"),
     "i_emploi_local": dict(dataset=r"concentration de l.emploi", valeur=r"indice|concentration|icem", transfo="haut"),
     "i_intermodalite": dict(dataset=r"stations de transports en commun", valeur=r"total|ensemble|nb|stations", transfo="haut"),
-    # Proxy provisoire du "gisement" : distance domicile-travail moyenne tous modes (courte = favorable).
-    # A remplacer par la part des trajets < 5 km (jeu "classe de distance") apres inspection.
-    "i_gisement": dict(dataset=r"Distance moyenne domicile-travail", valeur=r"distance|moyenne|dist",
-                       filtre=(r"mode", r"ensemble|tous|total"), transfo="bas"),
+    # Gisement : part des actifs dont le trajet domicile-travail fait moins de 5 km (jeu "classe de distance", maille commune)
+    "i_gisement": dict(dataset=r"classe de distance", classes_max_km=5, transfo="haut"),
 }
 # Les jeux TBMD ont une ressource par maille (commune, epci, departement, region) : on prend la maille commune.
 # Format long : annee, geocode_commune, [type_...], valeur, numerateur, denominateur.
@@ -103,4 +101,4 @@ REGIONS_GEOFABRIK = [
 ]
 
 # Jeux TBMD seulement decrits dans les logs (colonnes + modalites) pour regler un futur indicateur (ex. i_gisement : part < 5 km)
-DIAGNOSTIC_TBMD = [r"classe de distance"]
+DIAGNOSTIC_TBMD = [r"nombre de voiture"]  # i_peu_motorises : lister colonnes et modalites avant de brancher

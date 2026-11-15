@@ -8,7 +8,7 @@ import couches
 import exporter
 import routes_calmes
 import securite
-from outils import choisir_ressource, lire_csv, log, percentile, telecharger, trouver_col, vers_nombre
+from outils import borne_haute_km, choisir_ressource, lire_csv, log, percentile, telecharger, trouver_col, vers_nombre
 
 REGEX_CODE = r"^(code_?commune|codgeo|code_?insee|insee_?com|geo_?code|code)$|code.*(geo|commune|insee)"
 
@@ -27,6 +27,8 @@ def lire_indicateur(chemin, c):
     except KeyError:
         pass
     col_v = trouver_col(df, c["valeur"], "valeur")
+    if c.get("classes_max_km"):
+        return part_classes_courtes(df, col_code, col_v, c["classes_max_km"])
     col_t = next((k for k in df.columns if re.search(r"^type_|_type$", str(k), re.I)), None)
     if col_t:  # ventilation : ligne "total" si elle existe, sinon somme des categories
         log(f"  ventilation '{col_t}' : {sorted(df[col_t].dropna().unique())[:15]}")
@@ -35,6 +37,24 @@ def lire_indicateur(chemin, c):
     log(f"  colonne '{col_v}' ({len(df)} lignes)")
     out = pd.DataFrame({"code": df[col_code].astype(str), "v": vers_nombre(df[col_v])})
     return out.groupby("code", as_index=False)["v"].sum(min_count=1)
+
+
+def part_classes_courtes(df, col_code, col_v, km_max):
+    """Part des actifs dont la distance domicile-travail est <= km_max : somme des classes dont la borne haute <= km_max,
+    rapportee a la somme de toutes les classes bornees ou ouvertes (robuste que `valeur` soit une part ou un effectif)."""
+    col_c = next((k for k in df.columns if re.search(r"classe", str(k), re.I)), None) or trouver_col(df, r"distance", "classe de distance")
+    labels = sorted(df[col_c].dropna().unique())
+    log(f"  classes '{col_c}' : {labels[:15]}")
+    df = df[~df[col_c].astype(str).str.contains(r"^(?:total|ensemble|tous|toutes)\b", case=False, regex=True, na=False)].copy()
+    df["_v"] = vers_nombre(df[col_v])
+    df["_courte"] = df[col_c].map(lambda x: (borne_haute_km(x) or 1e9) <= km_max)
+    if not df["_courte"].any():
+        raise RuntimeError(f"aucune classe <= {km_max} km reconnue parmi {labels}")
+    g = df.groupby(df[col_code].astype(str))
+    courte = df[df["_courte"]].groupby(df[col_code].astype(str))["_v"].sum(min_count=1)
+    total = g["_v"].sum(min_count=1)
+    v = (100 * courte / total.where(total > 0)).clip(0, 100)
+    return pd.DataFrame({"code": v.index, "v": v.values}).dropna()
 
 
 def construire(indicateurs, dossier):

@@ -100,3 +100,18 @@ def test_controle_score_et_poids_ts():
     t["grille"] = 5
     out = controle.rapport_controle(t.reset_index(names="code"), pd.Series(rng.integers(50, 5000, 300), index=codes))
     assert any("Sensibilite" in l for l in out)
+
+
+def test_gisement_part_trajets_courts(tmp_path):
+    import gzip
+    import assembler
+    from outils import borne_haute_km
+    assert borne_haute_km("Moins de 1 km") == 1 and borne_haute_km("2 a moins de 5 km") == 5 and borne_haute_km("5 à moins de 10 km") == 10
+    assert borne_haute_km("20 km ou plus") is None and borne_haute_km("Ensemble") is None
+    f = tmp_path / "g.csv"   # gzip sous un nom .csv, effectifs (pas des parts) : la part est calculee sur le total
+    lignes = ["annee,geocode_commune,classe_distance,valeur"]
+    for cl, a, b in [("Moins de 1 km", 10, 0), ("1 à moins de 5 km", 30, 10), ("5 à moins de 10 km", 40, 30), ("10 km ou plus", 20, 60)]:
+        lignes += [f"2022,03001,{cl},{a}", f"2022,03002,{cl},{b}"]
+    f.write_bytes(gzip.compress("\n".join(lignes).encode()))
+    t = assembler.lire_indicateur(f, dict(valeur=r"^valeur$", classes_max_km=5)).set_index("code")["v"]
+    assert t["03001"] == 40.0 and t["03002"] == 10.0
