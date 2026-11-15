@@ -1,8 +1,8 @@
 import { AXES, GRILLE_RURAL_MIN, INDICATEURS } from "./indicators";
 import { couverture, type Config } from "./data";
 import {
-  RAMPE, SANS_DONNEE, libellesClasses, poidsParDefaut, profil, scoreAxe, scoreMode,
-  type Ligne, type Mode, type Poids,
+  RAMPE, SANS_DONNEE, SEUILS_DEFAUT, libellesClasses, poidsParDefaut, profil, scoreAxe, scoreMode, seuilsRelatifs,
+  type Ligne, type Mode, type Poids, type Seuils,
 } from "./score";
 
 export interface Etat {
@@ -84,6 +84,13 @@ export function monterPanneau(root: HTMLElement, cfg: Config, table: Ligne[], et
     `<span><i style="background:${SANS_DONNEE}"></i>sans donnée</span>`;
 
   // ---- fiche ----
+  let cleSeuils = "";
+  let seuils: Seuils = SEUILS_DEFAUT;
+  const seuilsCourants = () => {
+    const k = JSON.stringify(etat.poids);
+    if (k !== cleSeuils) { seuils = seuilsRelatifs(table, etat.poids); cleSeuils = k; }
+    return seuils;
+  };
   function fiche() {
     const el = $("#fiche");
     const l = selection ? index.get(selection) : undefined;
@@ -102,7 +109,7 @@ export function monterPanneau(root: HTMLElement, cfg: Config, table: Ligne[], et
     el.innerHTML = `<div class="fiche">
       <h3>${esc(l.nom)}</h3>
       <div class="desc">Code ${esc(l.code)}${l.dep ? " · dép. " + esc(l.dep) : ""}${typeof l.grille === "number" ? " · grille densité " + l.grille : ""}</div>
-      <p class="profil">${esc(profil(u, f, d))}</p>
+      <p class="profil">${esc(profil(u, f, d, seuilsCourants()))}</p>
       ${barre("Priorité globale", g)}${barre("Usage", u)}${barre("Faisabilité", f)}${barre("Déficit", d)}
       <h2 style="margin-top:12px">Indicateurs</h2>
       ${INDICATEURS.map((i) => barre(i.label, typeof l[i.id] === "number" ? (l[i.id] as number) : null)).join("")}

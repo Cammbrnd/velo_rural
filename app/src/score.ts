@@ -1,4 +1,4 @@
-import { AXES, INDICATEURS, type Axe } from "./indicators";
+import { AXES, GRILLE_RURAL_MIN, INDICATEURS, type Axe } from "./indicators";
 
 export type Mode = "global" | Axe;
 export type Ligne = Record<string, unknown>;
@@ -108,12 +108,31 @@ export function libellesClasses(): string[] {
 // ---------- lecture indicative du profil ----------
 export const SEUIL_USAGE = 55;
 export const SEUIL_FAISABILITE = 50;
+export interface Seuils { usage: number; faisabilite: number; deficit: number }
+export const SEUILS_DEFAUT: Seuils = { usage: SEUIL_USAGE, faisabilite: SEUIL_FAISABILITE, deficit: 50 };
 
-export function profil(u: number | null, f: number | null, d: number | null): string {
+function quantile(v: number[], q: number): number | null {
+  if (!v.length) return null;
+  const s = [...v].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.floor(q * s.length))];
+}
+
+// Seuils relatifs a la distribution reelle (communes rurales si la grille existe) : "fort" / "facile" = tiers superieur,
+// "deficitaire" = moitie superieure. Evite des seuils fixes mal calibres quand les poids ou les donnees changent.
+export function seuilsRelatifs(table: Ligne[], p: Poids): Seuils {
+  const rural = table.some((l) => typeof l.grille === "number")
+    ? table.filter((l) => typeof l.grille === "number" && l.grille >= GRILLE_RURAL_MIN)
+    : table;
+  const q = (axe: Axe, f: number, defaut: number) =>
+    quantile(rural.map((l) => scoreAxe(l, axe, p)).filter((v): v is number => v !== null), f) ?? defaut;
+  return { usage: q("usage", 2 / 3, SEUIL_USAGE), faisabilite: q("faisabilite", 2 / 3, SEUIL_FAISABILITE), deficit: q("deficit", 0.5, 50) };
+}
+
+export function profil(u: number | null, f: number | null, d: number | null, s: Seuils = SEUILS_DEFAUT): string {
   if (u === null) return "Profil non évaluable (données d'usage manquantes).";
-  const fort = u >= SEUIL_USAGE;
-  const facile = f === null ? null : f >= SEUIL_FAISABILITE;
-  const retard = d !== null && d >= 50;
+  const fort = u >= s.usage;
+  const facile = f === null ? null : f >= s.faisabilite;
+  const retard = d !== null && d >= s.deficit;
   if (fort && facile !== false) return retard ? "Priorité d'aménagement : forte demande, conditions favorables, réseau déficitaire." : "Forte demande et conditions favorables ; réseau déjà relativement équipé.";
   if (fort && facile === false) return "Forte demande mais aménagement difficile : privilégier solutions légères (VAE, itinéraires partagés).";
   if (facile) return "Demande modérée, conditions favorables : opportunité à moindre coût (loisir, cyclotourisme).";

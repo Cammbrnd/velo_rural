@@ -86,12 +86,12 @@ def test_lire_indicateur_format_long(tmp_path):
 def test_controle_score_et_poids_ts():
     import controle
     ind, axes = controle.poids_ts()
-    assert ind["i_gisement"] == ("usage", 3) and axes == {"usage": 3, "faisabilite": 2, "deficit": 2}
+    assert ind["i_gisement"] == ("usage", 3) and axes == {"usage": 3, "faisabilite": 2, "deficit": 1}
     import numpy as np
     import pandas as pd
     df = pd.DataFrame({"i_compacite": [80.0, np.nan], "i_emploi_local": [20.0, np.nan], "i_securite": [50.0, 40.0]}, index=["a", "b"])
     g, sa = controle.score_global(df, ind, axes)
-    assert sa.loc["a", "usage"] == 50.0 and np.isnan(sa.loc["b", "usage"])  # (2*80+2*20)/4
+    assert sa.loc["a", "usage"] == 50.0 and np.isnan(sa.loc["b", "usage"])  # (1*80+1*20)/2
     assert g["a"] == (3 * 50 + 2 * 50) / 5 and g["b"] == 40.0  # axe usage absent pour b : ignore
     # synthetique complet : le rapport se construit sans erreur
     rng = np.random.default_rng(0)

@@ -56,3 +56,5 @@ td.num, th.num { text-align: right; }
 .infobulle b { display: block; }
 .erreur { color: #b42318; padding: 16px; }
 @media (max-width: 800px) { #app { grid-template-columns: 1fr; grid-template-rows: 55vh 45vh; } #carte { order: -1; } #panneau { border-right: 0; border-top: 1px solid var(--ligne); } }
+
+.alerte { position: absolute; left: 12px; top: 12px; right: 60px; z-index: 6; display: none; background: #fdecea; border: 1px solid #f1aeb5; color: #7a1c14; padding: 8px 10px; border-radius: 6px; font-size: 12px; }

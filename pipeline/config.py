@@ -51,7 +51,7 @@ for _c in INDICATEURS_TBMD.values():
 # Couches geographiques agregees par commune (couches.py). Cle = nom de l'indicateur produit.
 # Source : `url` (prioritaire) > `dataset_id` data.gouv > recherche plein texte (`recherche`, titre filtre par `titre`).
 # mode    : "longueur" (km de lignes dans la commune) | "points" (nombre d'objets)
-# transfo : "presence" (0 reste 0, >0 classe de 20 a 100) | "haut" | "bas" (percentile oriente)
+# transfo : "presence" (0 = non concerne -> ignore ; >0 classe de 50 a 100) | "haut" | "bas" (percentile oriente)
 # par_habitant : divise par la population (pour 1000 hab, plancher `pop_min`)
 # Les schemas reels ne sont pas verifies : lire donnees_brutes/catalogue_couches.txt et rapport.md apres le 1er run.
 # Une couche qui porte le nom d'un indicateur TBMD (i_deficit_*) le REMPLACE lorsqu'elle est lue.

@@ -33,6 +33,20 @@ async function demarrer() {
   carte.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
   carte.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
 
+  (window as unknown as { __carte?: maplibregl.Map }).__carte = carte; // test navigateur (voir scripts/smoke.py)
+
+  // alerte visible si les donnees communales ne se chargent pas (sinon la couche manque sans explication)
+  const alerte = document.createElement("div");
+  alerte.className = "alerte";
+  document.getElementById("carte")!.appendChild(alerte);
+  carte.on("error", (e) => {
+    const err = e.error as Error | undefined;
+    if ((e as unknown as { sourceId?: string }).sourceId !== "communes" && !/pmtiles|communes/i.test(String(err?.message ?? ""))) return; // fond IGN : ignore
+    console.error("Donnees communales :", err);
+    alerte.textContent = "Les données communales n'ont pas pu être chargées (" + String(err?.message ?? err).slice(0, 160) + "). Rechargez la page (Ctrl+F5).";
+    alerte.style.display = "block";
+  });
+
   const infobulle = document.createElement("div");
   infobulle.className = "infobulle";
   document.getElementById("carte")!.appendChild(infobulle);

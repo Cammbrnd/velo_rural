@@ -89,7 +89,8 @@ jobs:
           rm -f data/communes.geojson data/demo.geojson
           taille=$(stat -c %s data/communes.pmtiles); echo "communes.pmtiles : $((taille/1000000)) Mo"
           [ "$taille" -lt 95000000 ] || { echo "::error::PMTiles > 95 Mo : limite GitHub Pages (100 Mo par fichier)"; exit 1; }
-          echo '{"demo":false,"source":{"type":"pmtiles","url":"data/communes.pmtiles","couche":"communes"},"table":"data/indicateurs.json"}' > config.json
+          # ?v=<run> : evite qu'un navigateur melange d'anciens octets (cache des requetes Range) avec le nouveau fichier
+          echo "{\"demo\":false,\"source\":{\"type\":\"pmtiles\",\"url\":\"data/communes.pmtiles?v=$GITHUB_RUN_ID\",\"couche\":\"communes\"},\"table\":\"data/indicateurs.json?v=$GITHUB_RUN_ID\"}" > config.json
 
       # ---------- Application ----------
       - uses: actions/setup-node@v4
@@ -103,6 +104,14 @@ jobs:
           npm ci
           npm test
           npm run build
+      - name: Test navigateur sur les vraies donnees (couche communale visible sur bureau)
+        continue-on-error: true
+        run: |
+          pip install -q playwright
+          cd app
+          (npx vite preview --port 4173 --host 127.0.0.1 > /tmp/preview.log 2>&1 &)
+          sleep 5
+          python scripts/smoke.py http://127.0.0.1:4173/ /tmp/smoke.png
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

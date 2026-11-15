@@ -97,13 +97,12 @@ def vers_nombre(serie):
 
 
 def percentile_presence(serie):
-    """Pour les indicateurs 'presence' (km, nombre d'objets) : 0 reste 0, les valeurs > 0 occupent 20-100.
-    Evite que la masse des communes a 0 obtienne un percentile median."""
+    """Indicateurs 'presence' (km, nombre d'objets) traites en BONUS : 0 = commune non concernee -> NaN (ignoree dans la
+    moyenne ponderee) ; les valeurs > 0 occupent 50-100. Une commune sans ligne n'est ainsi pas penalisee."""
     s = serie.astype(float)
     pos = s > 0
-    out = pd.Series(0.0, index=s.index)
-    out[pos] = (20 + 80 * s[pos].rank(pct=True, method="average")).round(1)
-    out[s.isna()] = float("nan")
+    out = pd.Series(float("nan"), index=s.index)
+    out[pos] = (50 + 50 * s[pos].rank(pct=True, method="average")).round(1)
     return out
 
 

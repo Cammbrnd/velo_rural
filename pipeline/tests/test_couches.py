@@ -24,7 +24,7 @@ def communes():
 
 def test_percentile_presence():
     p = percentile_presence(pd.Series([0.0, 0.0, 5.0, 10.0, np.nan]))
-    assert p.iloc[0] == 0 and p.iloc[1] == 0 and 20 < p.iloc[2] < p.iloc[3] == 100 and np.isnan(p.iloc[4])
+    assert np.isnan(p.iloc[0]) and np.isnan(p.iloc[1]) and 50 < p.iloc[2] < p.iloc[3] == 100 and np.isnan(p.iloc[4])
 
 
 def test_longueur_decoupee_par_commune(communes):
@@ -50,7 +50,7 @@ def test_indicateur_couche_de_bout_en_bout(communes, tmp_path, monkeypatch):
     monkeypatch.setattr(couches, "telecharger", lambda url, dest: f)
     c = dict(mode="longueur", transfo="presence", filtre=("statut", "ferm|declass"))
     s, detail = couches.indicateur_couche("i_emprises_ferrees", c, communes, tmp_path)
-    assert s["03001"] == 100.0 and s["03002"] == 0.0 and "1 objets lus" in detail   # seule la ligne fermee est retenue
+    assert s["03001"] == 100.0 and np.isnan(s["03002"]) and "1 objets lus" in detail   # seule la ligne fermee est retenue
     # sans filtre, ~7,7 km dans chaque commune : par habitant, A (1000 hab) en a 4x moins que B (250 hab) => deficit maximal pour A
     c2 = dict(mode="longueur", transfo="bas", par_habitant=True)
     s2, _ = couches.indicateur_couche("i_deficit_lineaire", c2, communes, tmp_path)

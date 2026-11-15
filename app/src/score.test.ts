@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { expression, latest } from "@maplibre/maplibre-gl-style-spec";
 import { INDICATEURS } from "./indicators";
-import { exprCouleur, exprScore, poidsParDefaut, scoreMode, type Ligne, type Mode } from "./score";
+import { exprCouleur, exprScore, poidsParDefaut, profil, scoreMode, seuilsRelatifs, type Ligne, type Mode } from "./score";
 
 function evaluer(expr: unknown, props: Ligne, spec: object): unknown {
   const r = expression.createPropertyExpression(expr as never, "paint", spec as never);
@@ -54,5 +54,18 @@ describe("score JS == expression MapLibre", () => {
     for (const k of Object.keys(z.axes)) z.axes[k as keyof typeof z.axes] = 0;
     expect(scoreMode({ i_gisement: 50 }, "global", z)).toBeNull();
     expect(evaluer(exprScore("global", z), { i_gisement: 50 }, specNombre)).toBe(-1);
+  });
+});
+
+describe("seuils relatifs du profil", () => {
+  it("tiers superieur des communes rurales, urbaines exclues", () => {
+    const p = poidsParDefaut();
+    const table: Ligne[] = Array.from({ length: 30 }, (_, i) => ({ code: String(i), grille: 6, i_gisement: i * 3, i_routes_calmes: i * 3, i_deficit_lineaire: 50 }));
+    table.push({ code: "u", grille: 1, i_gisement: 100 }); // urbaine : ignoree
+    const s = seuilsRelatifs(table, p);
+    expect(s.usage).toBeGreaterThanOrEqual(57);
+    expect(s.usage).toBeLessThanOrEqual(63);
+    expect(profil(90, 90, 80, s)).toMatch(/Priorité d'aménagement/);
+    expect(profil(10, 10, 80, s)).toMatch(/faible/);
   });
 });

@@ -1,7 +1,7 @@
 import "./resultats.css";
 import { AXES, GRILLE_RURAL_MIN, INDICATEURS } from "./indicators";
 import { chargerConfig, chargerDonnees, couverture } from "./data";
-import { RAMPE, SEUILS, classe, poidsParDefaut, profil, scoreAxe, scoreGlobal, scoreMode, valeur, type Ligne, type Mode } from "./score";
+import { RAMPE, SEUILS, classe, poidsParDefaut, profil, scoreAxe, scoreGlobal, scoreMode, seuilsRelatifs, valeur, type Ligne, type Mode } from "./score";
 
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 const arr = (v: number | null) => (v === null ? "n.d." : String(Math.round(v)));
@@ -71,6 +71,7 @@ async function main() {
     : `<span class="pastille" style="background:${RAMPE[classe(v)]};color:${TEXTE_CLAIR[classe(v)] ? "#fff" : "#0b0b0b"}">${Math.round(v)}</span>`;
 
   function rendre() {
+    const seuils = seuilsRelatifs(table, p);
     const tout = lignes();
     const notes = tout.map((r) => r.mode).filter((v): v is number => v !== null);
     const med = mediane(notes);
@@ -100,7 +101,7 @@ async function main() {
     const vis = tri.slice(0, etat.limite);
     const th = (k: keyof Ranger, t: string) => `<th data-tri="${k}" ${etat.tri === k ? `aria-sort="${etat.sens > 0 ? "ascending" : "descending"}"` : ""}>${t}${etat.tri === k ? (etat.sens > 0 ? " ▲" : " ▼") : ""}</th>`;
     $("#tableau").innerHTML = `<table><thead><tr><th>#</th>${th("nom", "Commune")}${th("dep", "Dép.")}${th("mode", "Score")}${th("usage", "Usage")}${th("faisabilite", "Faisabilité")}${th("deficit", "Déficit")}<th>Lecture</th></tr></thead><tbody>
-      ${vis.map((r, i) => `<tr data-code="${esc(r.code)}" tabindex="0"><td>${i + 1}</td><td>${esc(r.nom)}</td><td>${esc(r.dep)}</td><td>${pastille(r.mode)}</td><td>${arr(r.usage)}</td><td>${arr(r.faisabilite)}</td><td>${arr(r.deficit)}</td><td class="profil">${esc(profil(r.usage, r.faisabilite, r.deficit))}</td></tr>
+      ${vis.map((r, i) => `<tr data-code="${esc(r.code)}" tabindex="0"><td>${i + 1}</td><td>${esc(r.nom)}</td><td>${esc(r.dep)}</td><td>${pastille(r.mode)}</td><td>${arr(r.usage)}</td><td>${arr(r.faisabilite)}</td><td>${arr(r.deficit)}</td><td class="profil">${esc(profil(r.usage, r.faisabilite, r.deficit, seuils))}</td></tr>
         ${etat.ouvert === r.code ? `<tr class="detail"><td colspan="8"><div class="barres">${INDICATEURS.map((ind) => { const v = valeur(r.l, ind.id); return `<div class="barre"><span>${esc(ind.label)}</span><b>${arr(v)}</b><i><u style="width:${v ?? 0}%"></u></i></div>`; }).join("")}</div></td></tr>` : ""}`).join("")}
       </tbody></table>${tri.length === 0 ? `<p class="desc">Aucune commune ne correspond aux filtres.</p>` : ""}`;
     ($("#plus") as HTMLButtonElement).hidden = tri.length <= etat.limite;
