@@ -35,6 +35,8 @@ INDICATEURS_TBMD = {
     "i_intermodalite": dict(dataset=r"stations de transports en commun", valeur=r"total|ensemble|nb|stations", transfo="haut"),
     # Gisement : part des actifs dont le trajet domicile-travail fait moins de 5 km (jeu "classe de distance", maille commune)
     "i_gisement": dict(dataset=r"classe de distance", classes_max_km=5, transfo="haut"),
+    # Menages sans voiture (part, dernier millesime) : demande potentielle de mobilite alternative
+    "i_peu_motorises": dict(dataset=r"nombre de voiture", filtre=(r"^nb_voitures$", r"aucune"), transfo="haut"),
 }
 # Les jeux TBMD ont une ressource par maille (commune, epci, departement, region) : on prend la maille commune.
 # Format long : annee, geocode_commune, [type_...], valeur, numerateur, denominateur.
@@ -101,4 +103,4 @@ REGIONS_GEOFABRIK = [
 ]
 
 # Jeux TBMD seulement decrits dans les logs (colonnes + modalites) pour regler un futur indicateur (ex. i_gisement : part < 5 km)
-DIAGNOSTIC_TBMD = [r"nombre de voiture"]  # i_peu_motorises : lister colonnes et modalites avant de brancher
+DIAGNOSTIC_TBMD = []  # jeux a decrire dans les logs (colonnes + modalites) avant de les brancher

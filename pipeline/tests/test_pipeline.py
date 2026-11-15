@@ -115,3 +115,11 @@ def test_gisement_part_trajets_courts(tmp_path):
     f.write_bytes(gzip.compress("\n".join(lignes).encode()))
     t = assembler.lire_indicateur(f, dict(valeur=r"^valeur$", classes_max_km=5)).set_index("code")["v"]
     assert t["03001"] == 40.0 and t["03002"] == 10.0
+
+
+def test_peu_motorises_filtre_modalite(tmp_path):
+    import assembler
+    f = tmp_path / "m.csv"
+    f.write_text("annee,geocode_commune,nb_voitures,valeur\n2023,03001,Aucune voiture,12.5\n2023,03001,1 voiture,50\n2017,03001,Aucune voiture,99\n2023,03002,Aucune voiture,4\n", encoding="utf-8")
+    t = assembler.lire_indicateur(f, dict(valeur=r"^valeur$", filtre=(r"^nb_voitures$", r"aucune"))).set_index("code")["v"]
+    assert t["03001"] == 12.5 and t["03002"] == 4
