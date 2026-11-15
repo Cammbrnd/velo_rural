@@ -67,8 +67,8 @@ COUCHES = {
     "i_canaux": dict(
         url=os.environ.get("URL_CANAUX") or None,
         # PROVISOIRE : domaine public fluvial (VNF) ; contient aussi des cours d'eau non navigables -> a affiner (filtre)
-        recherche=r"segments domaine public fluvial DPF metropole", titre=r"segments du domaine public fluvial.*m[ée]tropole",
-        formats=("geojson", "json", "gpkg", "zip", "shp"), mode="longueur", transfo="presence",
+        dataset_id="segments-du-domaine-public-fluvial-dpf-metropole",
+        formats=("geojson", "json", "gpkg", "zip", "shp"), plus_grosse=True, mode="longueur", transfo="presence",
     ),
     # Base nationale des lieux de covoiturage (BNLC) : intermodalite velo + covoiturage
     "i_covoiturage": dict(
@@ -101,3 +101,6 @@ REGIONS_GEOFABRIK = [
     "midi-pyrenees", "nord-pas-de-calais", "pays-de-la-loire", "picardie", "poitou-charentes",
     "provence-alpes-cote-d-azur", "rhone-alpes",
 ]
+
+# Jeux TBMD seulement decrits dans les logs (colonnes + modalites) pour regler un futur indicateur (ex. i_gisement : part < 5 km)
+DIAGNOSTIC_TBMD = [r"classe de distance"]

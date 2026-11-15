@@ -51,6 +51,18 @@ def main():
             inspection.append(f"=== {nom} : ECHEC {e}\n")
             continue
         inspection += [f"=== {nom} | {ds[0]['titre']} | {len(df)} lignes", "colonnes : " + " | ".join(df.columns), df.head(3).to_string(), ""]
+    for motif in cfg.DIAGNOSTIC_TBMD:
+        try:
+            ds = [d for d in catalogue if re.search(motif, d["titre"], re.I)]
+            res = choisir_ressource(ds[0]["id"], r"commune", plus_grosse=True)
+            df = lire_csv(telecharger(res["url"], cfg.DOSSIER_BRUT / "diagnostic_tbmd.csv"))
+            log(f"diagnostic '{ds[0]['titre']}' : colonnes {list(df.columns)}")
+            for k in df.columns:
+                u = df[k].dropna().unique()
+                if 1 < len(u) <= 25:
+                    log(f"  {k} : {sorted(map(str, u))}")
+        except Exception as e:  # noqa: BLE001
+            log(f"[!] diagnostic '{motif}' : {e}")
     (cfg.DOSSIER_BRUT / "inspection.txt").write_text("\n".join(inspection), encoding="utf-8")
     log("inspection ecrite : donnees_brutes/inspection.txt")
 
