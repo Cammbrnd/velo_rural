@@ -26,7 +26,7 @@ def ressources_caracteristiques(dataset_id):
     d = api_get(f"{API}/datasets/{dataset_id}/")
     out = []
     for r in d.get("resources", []):
-        m = re.search(r"car\w{0,4}t[ée]ristiques.*?(20\d{2})", (r.get("title") or "") + " " + (r.get("url") or ""), re.I)
+        m = re.search(r"car\w{0,4}t(?:[ée]ristiques)?[-_ ]*(20\d{2})", (r.get("title") or "") + " " + (r.get("url") or ""), re.I)
         if m and (r.get("format") or "").lower() == "csv":
             out.append((int(m.group(1)), r["url"]))
     out = sorted(set(out), reverse=True)

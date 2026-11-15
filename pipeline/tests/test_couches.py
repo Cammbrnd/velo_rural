@@ -101,3 +101,10 @@ def test_lire_couche_zip_sous_dossier(tmp_path):
         f.writestr("dossier/p.geojson", '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"a":1},"geometry":{"type":"Point","coordinates":[3.05,46.05]}}]}')
     g = couches.lire_couche(z, {}, "zip")
     assert len(g) == 1 and g.crs.to_epsg() == 4326
+
+
+def test_baac_noms_de_fichiers(monkeypatch):
+    titres = ["Caract_2025.csv", "caract-2023.csv", "carcteristiques-2022.csv", "caracteristiques-2020.csv", "Lieux_2025.csv", "usagers-2023.csv"]
+    ress = [{"title": t, "url": f"https://x/{t}", "format": "csv"} for t in titres]
+    monkeypatch.setattr(securite, "api_get", lambda *a, **k: {"resources": ress})
+    assert [a for a, _ in securite.ressources_caracteristiques("x")] == [2025, 2023, 2022, 2020]

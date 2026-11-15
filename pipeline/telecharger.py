@@ -31,6 +31,7 @@ def main():
     log(f"{len(catalogue)} jeux de donnees dans l'organisation TBMD")
     (cfg.DOSSIER_BRUT / "catalogue_tbmd.txt").write_text("\n".join(d["titre"] for d in catalogue), encoding="utf-8")
 
+    log("catalogue TBMD : " + " | ".join(d["titre"] for d in catalogue))
     inspection = []
     for nom, c in cfg.INDICATEURS_TBMD.items():
         ds = [d for d in catalogue if re.search(c["dataset"], d["titre"], re.I)]
