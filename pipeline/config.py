@@ -66,9 +66,9 @@ COUCHES = {
     # Canaux et rivieres navigables : chemins de halage (potentiel voie verte). Reseau VNF : a confirmer au 1er run.
     "i_canaux": dict(
         url=os.environ.get("URL_CANAUX") or None,
-        # PROVISOIRE : domaine public fluvial (VNF) ; contient aussi des cours d'eau non navigables -> a affiner (filtre)
+        # Segments du domaine public fluvial (OFB/Sandre), limites aux canaux (Nature = 'Canal, chenal') : les cours d'eau naturels n'ont pas de halage
         dataset_id="segments-du-domaine-public-fluvial-dpf-metropole",
-        diag=("^Nature$", "^Navigabilit", "^Etat$"), formats=None, ressource=r"G[ée]opackage|geojson", ordre=("geojson", "gpkg"), plus_grosse=True, mode="longueur", transfo="presence",
+        diag=("^Nature$",), filtre=(r"^Nature$", r"canal"), formats=None, ressource=r"G[ée]opackage|geojson", ordre=("geojson", "gpkg"), plus_grosse=True, mode="longueur", transfo="presence",
     ),
     # Base nationale des lieux de covoiturage (BNLC) : intermodalite velo + covoiturage
     "i_covoiturage": dict(
