@@ -92,3 +92,12 @@ def test_points_csv_coordonneesxy(tmp_path):
     f.write_text("id,capacite,coordonneesxy\n1,4,\"3.05,46.05\"\n2,2,\"[3.15, 46.05]\"\n3,1,\"50,10\"\n", encoding="utf-8")
     g = couches.lire_points_csv(f, {})
     assert len(g) == 2 and g.geometry.iloc[0].x == pytest.approx(3.05)
+
+
+def test_lire_couche_zip_sous_dossier(tmp_path):
+    import zipfile
+    z = tmp_path / "p.zip"
+    with zipfile.ZipFile(z, "w") as f:
+        f.writestr("dossier/p.geojson", '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"a":1},"geometry":{"type":"Point","coordinates":[3.05,46.05]}}]}')
+    g = couches.lire_couche(z, {}, "zip")
+    assert len(g) == 1 and g.crs.to_epsg() == 4326

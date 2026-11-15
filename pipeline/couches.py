@@ -4,6 +4,7 @@ aires de covoiturage, BNAC (amenagements cyclables), stationnements velo OSM.
 Chaque couche = une entree de config.COUCHES ; une couche en echec est ignoree (comme les indicateurs TBMD).
 """
 import re
+from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
@@ -66,9 +67,18 @@ def lire_points_csv(chemin, c):
 
 
 def lire_couche(chemin, c, ext):
+    if ext == "zip":  # on extrait le premier fichier geo/csv de l'archive (GDAL ne lit pas toujours les zip a sous-dossiers)
+        import zipfile
+        with zipfile.ZipFile(chemin) as z:
+            noms = [n for n in z.namelist() if re.search(r"\.(geojson|json|gpkg|shp|csv)$", n, re.I) and not n.endswith("/")]
+            if not noms:
+                raise RuntimeError(f"aucun fichier geo/csv dans l'archive : {z.namelist()[:10]}")
+            log(f"  archive : lecture de {noms[0]}")
+            chemin = Path(z.extract(noms[0], Path(chemin).parent / (Path(chemin).stem + "_extrait")))
+        ext = chemin.suffix.lower().lstrip(".")
     if ext == "csv":
         return lire_points_csv(chemin, c)
-    g = gpd.read_file(chemin if ext != "zip" else f"zip://{chemin}")
+    g = gpd.read_file(chemin)
     if g.crs is None:
         g = g.set_crs(4326)
     return g.to_crs(4326)

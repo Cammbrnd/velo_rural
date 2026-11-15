@@ -30,7 +30,7 @@ def ressources_caracteristiques(dataset_id):
         if m and (r.get("format") or "").lower() == "csv":
             out.append((int(m.group(1)), r["url"]))
     out = sorted(set(out), reverse=True)
-    if not out or out[0][0] < 2022:  # aide au diagnostic : titres reels des ressources csv
+    if not out or out[0][0] < 2024:  # aide au diagnostic : titres reels des ressources csv
         log("  BAAC titres csv : " + " | ".join(str(r.get("title")) for r in d.get("resources", []) if (r.get("format") or "").lower() == "csv")[:1500])
     return out
 
