@@ -42,7 +42,7 @@ def choisir_ressource(dataset_id, ressource=None, formats=("csv", "csv.gz"), plu
     toutes = d.get("resources", [])
     fmt = lambda r: (r.get("format") or "").lower()  # noqa: E731
     if formats is None:
-        rs = [r for r in toutes if not re.search(r"wms|wfs|ogc|pdf|html|xls|doc", fmt(r)) and r.get("url")]
+        rs = [r for r in toutes if not re.search(r"wms|wfs|ogc|pdf|html|xls|doc|www", fmt(r)) and r.get("url")]
     else:
         rs = [r for r in toutes if fmt(r) in formats]
     rs = [r for r in rs if not re.search(r"description|champs|dictionnaire|retir", r.get("title") or "", re.I)]

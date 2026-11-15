@@ -68,7 +68,7 @@ COUCHES = {
         url=os.environ.get("URL_CANAUX") or None,
         # PROVISOIRE : domaine public fluvial (VNF) ; contient aussi des cours d'eau non navigables -> a affiner (filtre)
         dataset_id="segments-du-domaine-public-fluvial-dpf-metropole",
-        formats=None, ordre=("geojson", "gpkg", "json", "zip", "shp", "gml"), plus_grosse=True, mode="longueur", transfo="presence",
+        formats=None, ressource=r"G[ée]opackage|geojson", ordre=("geojson", "gpkg"), plus_grosse=True, mode="longueur", transfo="presence",
     ),
     # Base nationale des lieux de covoiturage (BNLC) : intermodalite velo + covoiturage
     "i_covoiturage": dict(
