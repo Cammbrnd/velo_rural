@@ -25,7 +25,7 @@ def resoudre_url(c):
         return c["url"], c["url"].rsplit("/", 1)[-1]
     formats = c.get("formats", FORMATS_GEO)
     if c.get("dataset_id"):
-        r = choisir_ressource(c["dataset_id"], c.get("ressource"), formats)
+        r = choisir_ressource(c["dataset_id"], c.get("ressource"), formats, c.get("plus_grosse", False))
         return r["url"], r["titre"]
     for d in rechercher_datasets(c["recherche"], n=10):
         if not re.search(c.get("titre", c["recherche"]), d["titre"], re.I):
@@ -51,9 +51,14 @@ def extension(url, titre):
 def lire_points_csv(chemin, c):
     """CSV a coordonnees (lon/lat) -> GeoDataFrame WGS84 ; conserve la colonne code commune si elle existe."""
     df = lire_csv(chemin)
-    col_x = trouver_col(df, c.get("col_lon", r"^(xlong|x_?long|lon|longitude|x)$"), "longitude")
-    col_y = trouver_col(df, c.get("col_lat", r"^(ylat|y_?lat|lat|latitude|y)$"), "latitude")
-    x, y = vers_nombre(df[col_x]), vers_nombre(df[col_y])
+    try:
+        col_x = trouver_col(df, c.get("col_lon", r"^(xlong|x_?long|lon|longitude|x)$"), "longitude")
+        col_y = trouver_col(df, c.get("col_lat", r"^(ylat|y_?lat|lat|latitude|y)$"), "latitude")
+        x, y = vers_nombre(df[col_x]), vers_nombre(df[col_y])
+    except KeyError:  # schema stationnement cyclable : une seule colonne "lon,lat"
+        xy = df[trouver_col(df, r"coordonnees.?xy|geo_?point", "coordonneesxy")].astype(str).str.extract(
+            r"(-?\d+(?:\.\d+)?)\s*[,; ]\s*(-?\d+(?:\.\d+)?)")
+        x, y = vers_nombre(xy[0]), vers_nombre(xy[1])
     ok = x.between(-6, 10) & y.between(41, 52)  # metropole
     df = df[ok]
     g = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(x[ok], y[ok]), crs=4326)

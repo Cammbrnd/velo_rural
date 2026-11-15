@@ -42,7 +42,7 @@ def main():
             log(f"    {nom} : {len(ds)} jeux correspondent, utilisation de '{ds[0]['titre']}'")
         log(f"-> {nom} : {ds[0]['titre']}")
         try:
-            res = choisir_ressource(ds[0]["id"], c.get("ressource"))
+            res = choisir_ressource(ds[0]["id"], c.get("ressource"), plus_grosse=True)
             f = telecharger(res["url"], cfg.DOSSIER_BRUT / f"{nom}.csv")
             df = lire_csv(f)
         except Exception as e:  # noqa: BLE001 - on continue avec les autres indicateurs

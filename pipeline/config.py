@@ -38,6 +38,9 @@ INDICATEURS_TBMD = {
     "i_gisement": dict(dataset=r"Distance moyenne domicile-travail", valeur=r"distance|moyenne|dist",
                        filtre=(r"mode", r"ensemble|tous|total"), transfo="bas"),
 }
+# Les jeux TBMD ont une ressource par maille (commune, epci, departement, region) : on prend la maille commune.
+for _c in INDICATEURS_TBMD.values():
+    _c.setdefault("ressource", r"commune")
 # Prevus mais non produits ici : i_relief (MNT), i_climat (SAFRAN), i_routes_calmes (BD TOPO/OSM),
 # i_securite (BAAC), i_peu_motorises. L'application ignore tout indicateur absent.
 
@@ -66,7 +69,7 @@ COUCHES = {
     ),
     # Base nationale des lieux de covoiturage (BNLC) : intermodalite velo + covoiturage
     "i_covoiturage": dict(
-        dataset_id="5d6eaffc8b4c417cdc452ac3", formats=("csv",), mode="points", col_code=r"insee", transfo="presence",
+        dataset_id="5d6eaffc8b4c417cdc452ac3", formats=("csv",), plus_grosse=True, mode="points", col_code=r"insee", transfo="presence",
     ),
     # BNAC : amenagements cyclables reels -> remplace le lineaire TBMD (km pour 1000 hab, peu = deficit eleve)
     "i_deficit_lineaire": dict(
@@ -74,11 +77,11 @@ COUCHES = {
         recherche=r"amenagements cyclables france metropolitaine", titre=r"am[ée]nagements? cyclables?",
         mode="longueur", transfo="bas", par_habitant=True,
     ),
-    # Stationnements velo OSM (PVELO) : remplace le stationnement TBMD (places pour 1000 hab)
+    # Stationnements velo OSM (PVELO, jeu national) : remplace le stationnement TBMD (places pour 1000 hab)
     "i_deficit_stationnement": dict(
         url=os.environ.get("URL_STATIONNEMENT") or None,
-        recherche=r"stationnements cyclables", titre=r"stationnements? (cyclables?|v[ée]los?)",
-        formats=("geojson", "json", "gpkg", "csv", "zip"), mode="points", transfo="bas", par_habitant=True,
+        dataset_id="614d7cd3474124ea1fa212f1",
+        formats=("geojson", "json", "gpkg", "csv", "zip"), plus_grosse=True, mode="points", transfo="bas", par_habitant=True,
     ),
 }
 

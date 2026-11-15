@@ -45,7 +45,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: pipeline/donnees_brutes
-          key: brut-${{ steps.mois.outputs.mois }}
+          key: brut-v2-${{ steps.mois.outputs.mois }}
       - name: Pipeline (telechargement, assemblage, export)
         working-directory: pipeline
         env:

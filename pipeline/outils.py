@@ -34,16 +34,21 @@ def lister_datasets_org(org_id):
         page += 1
 
 
-def choisir_ressource(dataset_id, ressource=None, formats=("csv",)):
-    """Premiere ressource dont le format est dans `formats` (et dont le titre correspond a `ressource`)."""
+def choisir_ressource(dataset_id, ressource=None, formats=("csv",), plus_grosse=False):
+    """Premiere ressource dont le format est dans `formats` (et dont le titre correspond a `ressource`).
+    Les dictionnaires de champs et jeux retires sont ignores ; `plus_grosse` prend la plus volumineuse."""
     d = api_get(f"{API}/datasets/{dataset_id}/")
     rs = [r for r in d.get("resources", []) if (r.get("format") or "").lower() in formats]
+    rs = [r for r in rs if not re.search(r"description|champs|dictionnaire|retir", r.get("title") or "", re.I)]
     if ressource:
         rs = [r for r in rs if re.search(ressource, r.get("title") or "", re.I)]
     if not rs:
         raise RuntimeError(f"aucune ressource {formats} pour le jeu {dataset_id}")
+    if plus_grosse:
+        rs.sort(key=lambda r: r.get("filesize") or 0, reverse=True)
     if len(rs) > 1:
         log(f"  {len(rs)} ressources, utilisation de : {rs[0].get('title')}")
+        log("  titres : " + " | ".join(str(r.get("title")) for r in rs[:12]))
     return {"titre": rs[0].get("title"), "url": rs[0]["url"], "format": rs[0].get("format")}
 
 

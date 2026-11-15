@@ -85,3 +85,10 @@ def test_routes_calmes_classification():
     h = pd.Series(["residential", "tertiary", "tertiary", "unclassified", "primary", "residential"])
     tags = pd.Series([None, '"maxspeed"=>"50"', '"surface"=>"asphalt","maxspeed"=>"80"', None, None, '"maxspeed"=>"90"'])
     assert routes_calmes.est_calme(h, tags).tolist() == [True, True, False, True, False, False]
+
+
+def test_points_csv_coordonneesxy(tmp_path):
+    f = tmp_path / "p.csv"
+    f.write_text("id,capacite,coordonneesxy\n1,4,\"3.05,46.05\"\n2,2,\"[3.15, 46.05]\"\n3,1,\"50,10\"\n", encoding="utf-8")
+    g = couches.lire_points_csv(f, {})
+    assert len(g) == 2 and g.geometry.iloc[0].x == pytest.approx(3.05)

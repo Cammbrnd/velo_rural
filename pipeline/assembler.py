@@ -19,6 +19,11 @@ def lire_indicateur(chemin, c):
         col_f = trouver_col(df, c["filtre"][0], "filtre")
         df = df[df[col_f].astype(str).str.contains(c["filtre"][1], case=False, regex=True, na=False)]
     df = df[df[col_code].astype(str).str.len() == 5]  # niveau commune uniquement
+    try:  # plusieurs millesimes : garder le plus recent
+        col_a = trouver_col(df, r"^(annee|millesime|year)$", "annee")
+        df = df[df[col_a] == df[col_a].max()]
+    except KeyError:
+        pass
     col_v = trouver_col(df, c["valeur"], "valeur")
     log(f"  colonne '{col_v}' ({len(df)} communes)")
     out = pd.DataFrame({"code": df[col_code].astype(str), "v": vers_nombre(df[col_v])})
