@@ -2,7 +2,7 @@
 import re
 
 import config as cfg
-from outils import choisir_ressource, lire_csv, lister_datasets_org, log, rechercher_datasets, telecharger
+from outils import API, api_get, choisir_ressource, lire_csv, lister_datasets_org, log, rechercher_datasets, telecharger
 
 
 def catalogue_couches():
@@ -54,6 +54,8 @@ def main():
     for motif in cfg.DIAGNOSTIC_TBMD:
         try:
             ds = [d for d in catalogue if re.search(motif, d["titre"], re.I)]
+            d = api_get(f"{API}/datasets/{ds[0]['id']}/")
+            log("  ressources : " + " | ".join(f"{r.get('title')} [{r.get('format')}]" for r in d.get("resources", [])[:20]))
             res = choisir_ressource(ds[0]["id"], r"commune", plus_grosse=True)
             df = lire_csv(telecharger(res["url"], cfg.DOSSIER_BRUT / "diagnostic_tbmd.csv"))
             log(f"diagnostic '{ds[0]['titre']}' : colonnes {list(df.columns)}")

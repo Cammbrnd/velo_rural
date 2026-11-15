@@ -1,5 +1,6 @@
 """Etape 3 : joint contours + indicateurs, ecrit geojson / json / config pour l'application."""
 import json
+import time
 
 import geopandas as gpd
 import pandas as pd
@@ -26,8 +27,16 @@ def _telecharger_contours():
     morceaux = []
     for d in deps:
         u = "https://geo.api.gouv.fr/communes"
-        j = requests.get(u, params=dict(codeDepartement=d, fields="nom,code,codeDepartement,population", format="geojson", geometry="contour"), timeout=120)
-        j.raise_for_status()
+        for essai in range(1, 7):  # geo.api.gouv.fr coupe parfois la connexion depuis les runners GitHub
+            try:
+                j = requests.get(u, params=dict(codeDepartement=d, fields="nom,code,codeDepartement,population", format="geojson", geometry="contour"), timeout=120)
+                j.raise_for_status()
+                break
+            except requests.RequestException as e:
+                log(f"  departement {d} : essai {essai}/6 echoue ({type(e).__name__})")
+                if essai == 6:
+                    raise
+                time.sleep(5 * essai)
         g = gpd.GeoDataFrame.from_features(j.json()["features"], crs=4326)
         morceaux.append(g.rename(columns={"codeDepartement": "dep", "population": "pop"}))
         log(f"  departement {d} : {len(g)} communes")
