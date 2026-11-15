@@ -39,8 +39,10 @@ INDICATEURS_TBMD = {
                        filtre=(r"mode", r"ensemble|tous|total"), transfo="bas"),
 }
 # Les jeux TBMD ont une ressource par maille (commune, epci, departement, region) : on prend la maille commune.
+# Format long : annee, geocode_commune, [type_...], valeur, numerateur, denominateur.
 for _c in INDICATEURS_TBMD.values():
     _c.setdefault("ressource", r"commune")
+    _c["valeur"] = r"^valeur$"
 # Prevus mais non produits ici : i_relief (MNT), i_climat (SAFRAN), i_routes_calmes (BD TOPO/OSM),
 # i_securite (BAAC), i_peu_motorises. L'application ignore tout indicateur absent.
 
@@ -79,9 +81,9 @@ COUCHES = {
     ),
     # Stationnements velo OSM (PVELO, jeu national) : remplace le stationnement TBMD (places pour 1000 hab)
     "i_deficit_stationnement": dict(
-        url=os.environ.get("URL_STATIONNEMENT") or None,
-        dataset_id="614d7cd3474124ea1fa212f1",
-        formats=("geojson", "json", "gpkg", "csv", "zip"), plus_grosse=True, mode="points", transfo="bas", par_habitant=True,
+        # jeu 614d7cd3474124ea1fa212f1 : le csv principal (geodatamine) est mort -> zip geojson, lien par id de ressource
+        url=os.environ.get("URL_STATIONNEMENT") or "https://www.data.gouv.fr/api/1/datasets/r/ca40e121-1648-4b90-b519-df41e2a8e1b0",
+        ext="zip", mode="points", transfo="bas", par_habitant=True,
     ),
 }
 

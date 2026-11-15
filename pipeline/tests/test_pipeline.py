@@ -73,3 +73,11 @@ def test_exporter(tmp_path):
     tab = json.loads((tmp_path / "data" / "indicateurs.json").read_text())
     assert tab[1]["i_a"] is None and tab[0]["nom"] == "A"
     assert json.loads((tmp_path / "config.json").read_text())["demo"] is False
+
+
+def test_lire_indicateur_format_long(tmp_path):
+    import assembler
+    f = tmp_path / "i.csv"
+    f.write_text("annee,geocode_commune,type_accroche,valeur\n2024,03001,a,1.5\n2024,03001,b,2\n2024,2A004,a,4\n2023,03001,a,99\n", encoding="utf-8")
+    t = assembler.lire_indicateur(f, dict(valeur=r"^valeur$")).set_index("code")["v"]
+    assert t["03001"] == 3.5 and t["2A004"] == 4

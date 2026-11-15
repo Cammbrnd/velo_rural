@@ -26,10 +26,13 @@ def ressources_caracteristiques(dataset_id):
     d = api_get(f"{API}/datasets/{dataset_id}/")
     out = []
     for r in d.get("resources", []):
-        m = re.search(r"caract[ée]ristiques.*?(20\d{2})", (r.get("title") or "") + " " + (r.get("url") or ""), re.I)
+        m = re.search(r"car\w{0,4}t[ée]ristiques.*?(20\d{2})", (r.get("title") or "") + " " + (r.get("url") or ""), re.I)
         if m and (r.get("format") or "").lower() == "csv":
             out.append((int(m.group(1)), r["url"]))
-    return sorted(set(out), reverse=True)
+    out = sorted(set(out), reverse=True)
+    if not out or out[0][0] < 2022:  # aide au diagnostic : titres reels des ressources csv
+        log("  BAAC titres csv : " + " | ".join(str(r.get("title")) for r in d.get("resources", []) if (r.get("format") or "").lower() == "csv")[:1500])
+    return out
 
 
 def indicateur_securite(communes, dossier, c=None):

@@ -115,7 +115,7 @@ def superficie_km2(communes):
 def indicateur_couche(nom, c, communes, dossier):
     """Retourne (serie_indicateur_0_100 indexee par code, detail)."""
     url, titre = resoudre_url(c)
-    ext = extension(url, titre)
+    ext = c.get("ext") or extension(url, titre)
     f = telecharger(url, dossier / f"couche_{nom}.{ext}")
     g = filtrer(lire_couche(f, c, ext), c.get("filtre"))
     if g.empty:

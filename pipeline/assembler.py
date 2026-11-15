@@ -1,4 +1,6 @@
 """Etape 2 : assemble les indicateurs par commune, les oriente (100 = favorable), normalise en percentiles."""
+import re
+
 import pandas as pd
 
 import config as cfg
@@ -25,9 +27,14 @@ def lire_indicateur(chemin, c):
     except KeyError:
         pass
     col_v = trouver_col(df, c["valeur"], "valeur")
-    log(f"  colonne '{col_v}' ({len(df)} communes)")
+    col_t = next((k for k in df.columns if re.search(r"^type_|_type$", str(k), re.I)), None)
+    if col_t:  # ventilation : ligne "total" si elle existe, sinon somme des categories
+        log(f"  ventilation '{col_t}' : {sorted(df[col_t].dropna().unique())[:15]}")
+        tot = df[df[col_t].astype(str).str.contains(r"^(?:total|ensemble|tous|toutes)\b", case=False, regex=True)]
+        df = tot if len(tot) else df
+    log(f"  colonne '{col_v}' ({len(df)} lignes)")
     out = pd.DataFrame({"code": df[col_code].astype(str), "v": vers_nombre(df[col_v])})
-    return out.drop_duplicates("code")
+    return out.groupby("code", as_index=False)["v"].sum(min_count=1)
 
 
 def construire(indicateurs, dossier):
