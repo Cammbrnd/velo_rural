@@ -5,6 +5,7 @@ import pandas as pd
 
 import config as cfg
 import couches
+import relief
 import exporter
 import routes_calmes
 import securite
@@ -114,7 +115,8 @@ def grille_densite():
 def indicateurs_geo(communes, dossier):
     """Couches geographiques + securite (+ routes calmes si active) -> (table [code, indicateurs], rapport)."""
     table, rapport = couches.construire_couches(cfg.COUCHES, communes, dossier)
-    extras = [("i_securite", lambda: securite.indicateur_securite(communes, dossier))]
+    extras = [("i_securite", lambda: securite.indicateur_securite(communes, dossier)),
+              ("i_relief", lambda: relief.indicateur_relief(communes, dossier))]
     if cfg.ROUTES_CALMES:
         extras.append(("i_routes_calmes", lambda: routes_calmes.indicateur_routes_calmes(communes, dossier)))
     else:

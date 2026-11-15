@@ -43,7 +43,7 @@ INDICATEURS_TBMD = {
 for _c in INDICATEURS_TBMD.values():
     _c.setdefault("ressource", r"commune")
     _c["valeur"] = r"^valeur$"
-# Prevus mais non produits ici : i_relief (MNT), i_climat (SAFRAN), i_routes_calmes (BD TOPO/OSM),
+# Prevus mais non produits ici : i_climat (SAFRAN), i_routes_calmes (BD TOPO/OSM),
 # i_securite (BAAC), i_peu_motorises. L'application ignore tout indicateur absent.
 
 
