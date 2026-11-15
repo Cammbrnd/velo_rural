@@ -1,0 +1,7 @@
+{
+  "demo": true,
+  "source": {
+    "type": "geojson",
+    "url": "data/demo.geojson"
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+__pycache__/
+.pytest_cache/
+# generes par le pipeline / copies automatiquement
+pipeline/donnees_brutes/
+app/public/maplibre/
+app/public/data/communes.*
+app/public/data/indicateurs.json

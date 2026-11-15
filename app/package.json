@@ -1,0 +1,25 @@
+{
+  "name": "velo-rural-potentiel",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "predev": "node scripts/copie-worker.mjs",
+    "prebuild": "node scripts/copie-worker.mjs",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "demo": "node scripts/gen-demo.mjs"
+  },
+  "dependencies": {
+    "maplibre-gl": "^6.18.0",
+    "pmtiles": "^4.5.0"
+  },
+  "devDependencies": {
+    "@maplibre/maplibre-gl-style-spec": "^26.6.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
+  }
+}

@@ -1,0 +1,119 @@
+name: pipeline-et-deploiement
+
+on:
+  workflow_dispatch:          # lancement manuel depuis l'onglet Actions
+    inputs:
+      routes_calmes:
+        description: "Calculer les routes calmes (OSM, lourd : plusieurs Go telecharges)"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 5 1 * *"      # tous les mois (les jeux Ecolab sont mis a jour annuellement)
+  push:
+    branches: [main]
+    paths: ["app/**", "pipeline/**", ".github/workflows/**"]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  construire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------- Python : tests puis pipeline ----------
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pipeline/requirements.txt
+      - run: pip install -r pipeline/requirements.txt
+      - name: Tests du pipeline
+        run: python -m pytest -q pipeline/tests
+
+      - id: mois
+        run: echo "mois=$(date +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - name: Cache des donnees brutes (renouvele chaque mois)
+        uses: actions/cache@v4
+        with:
+          path: pipeline/donnees_brutes
+          key: brut-${{ steps.mois.outputs.mois }}
+      - name: Pipeline (telechargement, assemblage, export)
+        working-directory: pipeline
+        env:
+          ROUTES_CALMES: ${{ inputs.routes_calmes && '1' || '0' }}
+        run: python lancer.py
+      - name: Rapport du pipeline dans le resume du job
+        if: always()
+        run: |
+          [ -f pipeline/donnees_brutes/rapport.md ] && cat pipeline/donnees_brutes/rapport.md >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Fichiers d'inspection (colonnes des jeux telecharges)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inspection-pipeline
+          path: |
+            pipeline/donnees_brutes/inspection.txt
+            pipeline/donnees_brutes/rapport.md
+            pipeline/donnees_brutes/catalogue_tbmd.txt
+            pipeline/donnees_brutes/catalogue_couches.txt
+          if-no-files-found: ignore
+
+      # ---------- Tuiles PMTiles (tippecanoe compile une fois puis mis en cache) ----------
+      - name: Cache de tippecanoe
+        id: cache-tippe
+        uses: actions/cache@v4
+        with:
+          path: ~/bin/tippecanoe
+          key: tippecanoe-v1
+      - name: Compiler tippecanoe
+        if: steps.cache-tippe.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq libsqlite3-dev zlib1g-dev
+          git clone --depth 1 -q https://github.com/felt/tippecanoe.git /tmp/tippecanoe
+          make -C /tmp/tippecanoe -j"$(nproc)" > /dev/null
+          mkdir -p ~/bin && cp /tmp/tippecanoe/tippecanoe ~/bin/tippecanoe
+      - name: Generer les tuiles et configurer l'app
+        working-directory: app/public
+        run: |
+          ~/bin/tippecanoe -q -f -o data/communes.pmtiles -l communes -Z4 -z11 \
+            --detect-shared-borders --drop-densest-as-needed --no-tile-size-limit data/communes.geojson
+          rm -f data/communes.geojson data/demo.geojson
+          taille=$(stat -c %s data/communes.pmtiles); echo "communes.pmtiles : $((taille/1000000)) Mo"
+          [ "$taille" -lt 95000000 ] || { echo "::error::PMTiles > 95 Mo : limite GitHub Pages (100 Mo par fichier)"; exit 1; }
+          echo '{"demo":false,"source":{"type":"pmtiles","url":"data/communes.pmtiles","couche":"communes"},"table":"data/indicateurs.json"}' > config.json
+
+      # ---------- Application ----------
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Tests et build de l'application
+        working-directory: app
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: app/dist
+
+  deploiement:
+    needs: construire
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploiement.outputs.page_url }}
+    steps:
+      - id: deploiement
+        uses: actions/deploy-pages@v4
