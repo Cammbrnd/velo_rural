@@ -34,21 +34,28 @@ def lister_datasets_org(org_id):
         page += 1
 
 
-def choisir_ressource(dataset_id, ressource=None, formats=("csv", "csv.gz"), plus_grosse=False):
-    """Premiere ressource dont le format est dans `formats` (et dont le titre correspond a `ressource`).
-    Les dictionnaires de champs et jeux retires sont ignores ; `plus_grosse` prend la plus volumineuse."""
+def choisir_ressource(dataset_id, ressource=None, formats=("csv", "csv.gz"), plus_grosse=False, ordre=None):
+    """Premiere ressource dont le format est dans `formats` (None = tous sauf services wms/wfs, pdf, html) et dont le titre
+    correspond a `ressource`. Les dictionnaires de champs et jeux retires sont ignores ; `ordre` classe les formats par
+    preference ; `plus_grosse` prend la plus volumineuse (a rang egal)."""
     d = api_get(f"{API}/datasets/{dataset_id}/")
-    rs = [r for r in d.get("resources", []) if (r.get("format") or "").lower() in formats]
+    toutes = d.get("resources", [])
+    fmt = lambda r: (r.get("format") or "").lower()  # noqa: E731
+    if formats is None:
+        rs = [r for r in toutes if not re.search(r"wms|wfs|ogc|pdf|html|xls|doc", fmt(r)) and r.get("url")]
+    else:
+        rs = [r for r in toutes if fmt(r) in formats]
     rs = [r for r in rs if not re.search(r"description|champs|dictionnaire|retir", r.get("title") or "", re.I)]
     if ressource:
         rs = [r for r in rs if re.search(ressource, r.get("title") or "", re.I)]
     if not rs:
-        raise RuntimeError(f"aucune ressource {formats} pour le jeu {dataset_id}")
-    if plus_grosse:
-        rs.sort(key=lambda r: r.get("filesize") or 0, reverse=True)
-    if len(rs) > 1:
-        log(f"  {len(rs)} ressources, utilisation de : {rs[0].get('title')}")
-        log("  titres : " + " | ".join(str(r.get("title")) for r in rs[:12]))
+        dispo = " | ".join(f"{r.get('title')} [{r.get('format')}]" for r in toutes[:15])
+        raise RuntimeError(f"aucune ressource {formats} pour le jeu {dataset_id}. Ressources : {dispo}")
+    rang = (lambda r: ordre.index(fmt(r)) if fmt(r) in ordre else len(ordre)) if ordre else (lambda r: 0)
+    rs.sort(key=lambda r: (rang(r), -(r.get("filesize") or 0) if plus_grosse else 0))
+    if len(rs) > 1 or formats is None:
+        log(f"  {len(rs)} ressources, utilisation de : {rs[0].get('title')} [{rs[0].get('format')}]")
+        log("  titres : " + " | ".join(f"{r.get('title')} [{r.get('format')}]" for r in rs[:12]))
     return {"titre": rs[0].get("title"), "url": rs[0]["url"], "format": rs[0].get("format")}
 
 

@@ -108,3 +108,32 @@ def test_baac_noms_de_fichiers(monkeypatch):
     ress = [{"title": t, "url": f"https://x/{t}", "format": "csv"} for t in titres]
     monkeypatch.setattr(securite, "api_get", lambda *a, **k: {"resources": ress})
     assert [a for a, _ in securite.ressources_caracteristiques("x")] == [2025, 2023, 2022, 2020]
+
+
+def test_choisir_ressource_tous_formats(monkeypatch):
+    import outils
+    res = [dict(title="DPF wfs", format="ogc:wfs", url="http://x/wfs", filesize=1),
+           dict(title="DPF shp", format="shp", url="http://x/a", filesize=50),
+           dict(title="DPF geojson", format="geojson", url="http://x/b", filesize=10),
+           dict(title="Description des champs", format="csv", url="http://x/c")]
+    monkeypatch.setattr(outils, "api_get", lambda *a, **k: {"resources": res})
+    r = outils.choisir_ressource("id", formats=None, ordre=("geojson", "gpkg", "shp"), plus_grosse=True)
+    assert r["url"] == "http://x/b"
+    with pytest.raises(RuntimeError, match="Ressources"):
+        outils.choisir_ressource("id", formats=("gpkg",))
+
+
+def test_ext_reelle(tmp_path):
+    for contenu, attendu in [(b"PK\x03\x04abc", "zip"), (b"SQLite format 3\x00", "gpkg"), (b'{"type":"FeatureCollection"}', "geojson"), (b"<?xml version", "gml"), (b"a,b\n1,2", "csv")]:
+        f = tmp_path / "x"
+        f.write_bytes(contenu)
+        assert couches.ext_reelle(f, "csv") == attendu
+
+
+def test_longueur_sur_surfaces_utilise_le_contour(communes, tmp_path, monkeypatch):
+    f = tmp_path / "surf.geojson"
+    gpd.GeoDataFrame(geometry=[box(3.02, 46.02, 3.08, 46.08)], crs=4326).to_file(f, driver="GeoJSON")
+    monkeypatch.setattr(couches, "resoudre_url", lambda c: ("http://x/s.geojson", "s.geojson"))
+    monkeypatch.setattr(couches, "telecharger", lambda url, dest: f)
+    s, _ = couches.indicateur_couche("i_canaux", dict(mode="longueur", transfo="presence"), communes, tmp_path)
+    assert s["03001"] == 100.0 and pd.isna(s["03002"])

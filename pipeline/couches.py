@@ -26,7 +26,7 @@ def resoudre_url(c):
         return c["url"], c["url"].rsplit("/", 1)[-1]
     formats = c.get("formats", FORMATS_GEO)
     if c.get("dataset_id"):
-        r = choisir_ressource(c["dataset_id"], c.get("ressource"), formats, c.get("plus_grosse", False))
+        r = choisir_ressource(c["dataset_id"], c.get("ressource"), formats, c.get("plus_grosse", False), c.get("ordre"))
         return r["url"], r["titre"]
     for d in rechercher_datasets(c["recherche"], n=10):
         if not re.search(c.get("titre", c["recherche"]), d["titre"], re.I):
@@ -40,9 +40,24 @@ def resoudre_url(c):
     raise RuntimeError(f"aucun jeu data.gouv ne correspond a '{c['recherche']}' : fournir `url` dans config.COUCHES")
 
 
+def ext_reelle(chemin, ext):
+    """Extension deduite des octets du fichier (une URL data.gouv n'a pas toujours d'extension fiable)."""
+    with open(chemin, "rb") as f:
+        t = f.read(16)
+    if t.startswith(b"PK"):
+        return "zip"
+    if t.startswith(b"SQLite format"):
+        return "gpkg"
+    if t.lstrip().startswith((b"{", b"[")):
+        return "geojson"
+    if t.lstrip().startswith(b"<"):
+        return "gml"
+    return ext
+
+
 def extension(url, titre):
     for s in (url.split("?")[0], titre or ""):
-        m = re.search(r"\.(geojson|json|gpkg|zip|shp|csv)(\.gz)?$", s.lower())
+        m = re.search(r"\.(geojson|json|gpkg|zip|shp|gml|csv)(\.gz)?$", s.lower())
         if m:
             return m.group(1)
     return "geojson" if "geojson" in url.lower() else "csv"
@@ -70,7 +85,7 @@ def lire_couche(chemin, c, ext):
     if ext == "zip":  # on extrait le premier fichier geo/csv de l'archive (GDAL ne lit pas toujours les zip a sous-dossiers)
         import zipfile
         with zipfile.ZipFile(chemin) as z:
-            noms = [n for n in z.namelist() if re.search(r"\.(geojson|json|gpkg|shp|csv)$", n, re.I) and not n.endswith("/")]
+            noms = [n for n in z.namelist() if re.search(r"\.(geojson|json|gpkg|shp|gml|csv)$", n, re.I) and not n.endswith("/")]
             if not noms:
                 raise RuntimeError(f"aucun fichier geo/csv dans l'archive : {z.namelist()[:10]}")
             log(f"  archive : lecture de {noms[0]}")
@@ -127,7 +142,13 @@ def indicateur_couche(nom, c, communes, dossier):
     url, titre = resoudre_url(c)
     ext = c.get("ext") or extension(url, titre)
     f = telecharger(url, dossier / f"couche_{nom}.{ext}")
-    g = filtrer(lire_couche(f, c, ext), c.get("filtre"))
+    ext = ext_reelle(f, ext)
+    brut = lire_couche(f, c, ext)
+    log(f"  colonnes : {[k for k in brut.columns if k != 'geometry'][:15]}")
+    g = filtrer(brut, c.get("filtre"))
+    if c.get("mode") == "longueur":  # lignes uniquement ; a defaut (surfaces), on mesure le contour
+        lignes = g[g.geom_type.astype(str).str.contains("Line", na=False)]
+        g = lignes if len(lignes) else g.assign(geometry=g.geometry.boundary)
     if g.empty:
         raise RuntimeError("aucun objet apres filtrage (voir config.COUCHES[...]['filtre'])")
     if c["mode"] == "longueur":
