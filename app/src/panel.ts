@@ -56,6 +56,18 @@ export function monterPanneau(root: HTMLElement, cfg: Config, table: Ligne[], et
     <label class="case"><input type="checkbox" id="rural" ${etat.rural ? "checked" : ""} ${grilleDispo ? "" : "disabled"} /> Communes rurales uniquement (grille de densité INSEE 5 à 7)${grilleDispo ? "" : " — indisponible : grille absente des données"}</label>
     <div class="legende" id="legende" aria-label="Légende"></div>
 
+    <div id="exemples-bloc" hidden>
+      <h2>Exemples d'aménagement</h2>
+      <p class="desc">Pour quelques EPCI répartis sur le territoire : les 3 axes depuis le pôle qui concentrent le plus de demande (population × score), calculés sur le réseau OSM en évitant routes fréquentées et dénivelé. Indicatif, à valider sur le terrain.</p>
+      <label class="case"><input type="checkbox" id="exemples-voir" checked /> Afficher les tracés</label>
+      <select id="exemples-choix" aria-label="Aller à un EPCI"><option value="">Aller à un EPCI…</option></select>
+      <ul class="legende-ex">
+        <li><i style="background:#1a9850"></i> Aménagement existant (voie verte, piste)</li>
+        <li><i style="background:#f2a900"></i> Route calme : itinéraire partagé à signaler</li>
+        <li><i style="background:#d7191c"></i> Tronçon à sécuriser (route plus fréquentée)</li>
+      </ul>
+    </div>
+
     <h2>Pondération</h2>
     <p class="desc">Poids de 0 (ignoré) à 5. Les indicateurs absents des données sont ignorés ; la couverture indique la part de communes renseignées.</p>
     <div id="poids-axes">${AXES.map((a) => curseur("axe_" + a.id, a.label, etat.poids.axes[a.id], "", a.description)).join("")}</div>

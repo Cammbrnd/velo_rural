@@ -4,6 +4,7 @@ export interface Config {
   demo: boolean;
   source: { type: "geojson" | "pmtiles"; url: string; couche?: string };
   table?: string; // JSON [ {code, nom, grille, i_*...}, ... ] (obligatoire avec pmtiles)
+  exemples?: string; // GeoJSON des traces d'exemple (pole + traces par EPCI)
   fond?: string; // gabarit de tuiles raster {z}/{x}/{y} (par defaut : Plan IGN)
 }
 
@@ -42,4 +43,14 @@ export function couverture(table: Ligne[], ids: string[]): Record<string, number
     out[id] = table.length ? n / table.length : 0;
   }
   return out;
+}
+
+export async function chargerExemples(cfg: Config): Promise<GeoJSON.FeatureCollection | null> {
+  if (!cfg.exemples) return null;
+  try {
+    const r = await fetch(base + cfg.exemples);
+    return r.ok ? ((await r.json()) as GeoJSON.FeatureCollection) : null;
+  } catch {
+    return null; // couche facultative : l'application fonctionne sans
+  }
 }

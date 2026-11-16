@@ -22,7 +22,8 @@ with sync_playwright() as p:
         if n > 0:
             break
     etat = pg.evaluate("() => ({alerte: document.querySelector('.alerte')?.textContent || '', zoom: window.__carte?.getZoom(), panneau: document.getElementById('panneau').innerText.slice(0, 80)})")
-    print("SMOKE", json.dumps({"communes_rendues": n, **etat}, ensure_ascii=False))
+    ex = pg.evaluate("() => { const m = window.__carte; return m && m.getSource('exemples') ? m.querySourceFeatures('exemples').length : null; }")
+    print("SMOKE", json.dumps({"communes_rendues": n, "exemples": ex, **etat}, ensure_ascii=False))
     if capture:
         pg.screenshot(path=capture)
     b.close()

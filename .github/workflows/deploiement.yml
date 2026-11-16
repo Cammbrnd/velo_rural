@@ -99,7 +99,8 @@ jobs:
           taille=$(stat -c %s data/communes.pmtiles); echo "communes.pmtiles : $((taille/1000000)) Mo"
           [ "$taille" -lt 95000000 ] || { echo "::error::PMTiles > 95 Mo : limite GitHub Pages (100 Mo par fichier)"; exit 1; }
           # ?v=<run> : evite qu'un navigateur melange d'anciens octets (cache des requetes Range) avec le nouveau fichier
-          echo "{\"demo\":false,\"source\":{\"type\":\"pmtiles\",\"url\":\"data/communes.pmtiles?v=$GITHUB_RUN_ID\",\"couche\":\"communes\"},\"table\":\"data/indicateurs.json?v=$GITHUB_RUN_ID\"}" > config.json
+          ex=""; [ -f data/exemples.geojson ] && ex=",\"exemples\":\"data/exemples.geojson?v=$GITHUB_RUN_ID\""
+          echo "{\"demo\":false,\"source\":{\"type\":\"pmtiles\",\"url\":\"data/communes.pmtiles?v=$GITHUB_RUN_ID\",\"couche\":\"communes\"},\"table\":\"data/indicateurs.json?v=$GITHUB_RUN_ID\"$ex}" > config.json
 
       # ---------- Application ----------
       - uses: actions/setup-node@v4

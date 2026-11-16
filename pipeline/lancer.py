@@ -1,12 +1,13 @@
-"""Execution complete : python lancer.py [--etape telecharger|assembler|controle|exporter]"""
+"""Execution complete : python lancer.py [--etape telecharger|assembler|controle|exporter|exemples]"""
 import argparse
 
 import assembler
 import controle
+import exemples
 import exporter
 import telecharger
 
-ETAPES = {"telecharger": telecharger.main, "assembler": assembler.main, "controle": controle.main, "exporter": exporter.main}
+ETAPES = {"telecharger": telecharger.main, "assembler": assembler.main, "controle": controle.main, "exporter": exporter.main, "exemples": exemples.main}
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()

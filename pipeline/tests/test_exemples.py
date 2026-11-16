@@ -1,0 +1,103 @@
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import exemples  # noqa: E402
+
+LON0, LAT0 = 3.0, 46.0
+DX, DY = 0.0155, 0.009  # ~1,2 km x 1 km
+
+
+def reseau_grille(n=7, speciales=None):
+    """Grille n x n de voies residentielles ; `speciales` : {(i, j, 'h'|'v'): highway} pour changer une voie."""
+    speciales = speciales or {}
+    els, nid = [], lambda i, j: 1000 + i * 100 + j
+    def pt(i, j):
+        return dict(lon=LON0 + i * DX, lat=LAT0 + j * DY)
+    wid = 1
+    for j in range(n):  # lignes horizontales (en j fixe)
+        for i in range(n - 1):
+            hw = speciales.get((i, j, "h"), "residential")
+            els.append(dict(type="way", id=wid, nodes=[nid(i, j), nid(i + 1, j)], geometry=[pt(i, j), pt(i + 1, j)], tags=dict(highway=hw))); wid += 1
+    for i in range(n):
+        for j in range(n - 1):
+            hw = speciales.get((i, j, "v"), "residential")
+            els.append(dict(type="way", id=wid, nodes=[nid(i, j), nid(i, j + 1)], geometry=[pt(i, j), pt(i, j + 1)], tags=dict(highway=hw))); wid += 1
+    return els
+
+
+def communes_test():
+    pos = {"A": (0, 0, 3000), "B": (6, 0, 800), "C": (6, 6, 600), "D": (0, 6, 400), "E": (3, 3, 100)}
+    return pd.DataFrame([dict(code=k, nom="Commune " + k, pop=v[2], score=60.0, lon=LON0 + v[0] * DX, lat=LAT0 + v[1] * DY) for k, v in pos.items()])
+
+
+def test_aretes_et_categories():
+    els = reseau_grille(3, {(0, 0, "h"): "cycleway", (1, 0, "h"): "secondary", (0, 1, "h"): "track"})
+    coords, aretes = exemples.aretes_osm(els)
+    cats = {(a[0], a[1]): a[3] for a in aretes}
+    assert cats[(1000, 1100)] == "existant" and cats[(1100, 1200)] == "a_securiser"
+    assert cats[(1001, 1101)] is not None and cats[(1001, 1101)] == "a_securiser"  # track non revetue : pas calme
+    assert exemples.categorie("path", {}) is None and exemples.categorie("path", {"bicycle": "designated"}) == "existant"
+    assert sum(1 for a in aretes if a[3] == "calme") > 0 and all(a[2] > 500 for a in aretes)
+
+
+def test_traces_hub_et_communes_desservies():
+    coords, aretes = exemples.aretes_osm(reseau_grille())
+    alt = {n: 0.0 for n in coords}
+    adj = exemples.construire_graphe(coords, aretes, alt)
+    t = exemples.traces_epci(communes_test(), adj, coords, alt, "A")
+    assert 1 <= len(t) <= 3
+    p0 = t[0]["props"]
+    assert p0["pole"] == "Commune A" and p0["communes"] >= 2 and p0["longueur_km"] > 5
+    assert p0["pct_adapte"] == 100 and p0["km_a_securiser"] == 0
+    # les traces suivantes ne redessinent pas les segments deja traces
+    pts = [tuple(map(tuple, s[1])) for tr in t for s in tr["segments"]]
+    aretes_vues = [frozenset(pair) for seg in pts for pair in zip(seg[:-1], seg[1:])]
+    assert len(aretes_vues) == len(set(aretes_vues))
+
+
+def test_trace_evite_les_voies_a_securiser():
+    # la voie directe A->B (j=0) est une departementale ; le chemin par j=1 est calme et peu plus long
+    sp = {(i, 0, "h"): "secondary" for i in range(6)}
+    coords, aretes = exemples.aretes_osm(reseau_grille(7, sp))
+    adj = exemples.construire_graphe(coords, aretes, {n: 0.0 for n in coords})
+    coms = communes_test()[lambda d: d.code.isin(["A", "B"])]
+    t = exemples.traces_epci(coms, adj, coords, {n: 0.0 for n in coords}, "A")
+    assert t and t[0]["props"]["km_a_securiser"] < 3.0
+
+
+def test_denivele_penalise_un_col():
+    coords, aretes = exemples.aretes_osm(reseau_grille())
+    # un relief de 300 m sur la ligne centrale j=0 : le chemin doit contourner
+    alt = {n: (300.0 if (n - 1000) // 100 in (2, 3) and (n - 1000) % 100 == 0 else 0.0) for n in coords}
+    adj = exemples.construire_graphe(coords, aretes, alt)
+    t = exemples.traces_epci(communes_test()[lambda d: d.code.isin(["A", "B"])], adj, coords, alt, "A")
+    assert t[0]["props"]["denivele_positif_m"] < 200
+
+
+def test_choisir_epci_repartis_et_ruraux():
+    lignes = []
+    for k in range(6):  # 6 EPCI de 15 communes, departements differents, alignes d'ouest en est
+        for j in range(15):
+            lignes.append(dict(code=f"{k}{j:02d}", dep=f"{k:02d}", pop=2000 if j == 0 else 500, epci=f"E{k}", rural=True, score=50 + k, lon=-2 + k * 2.0 + j * 0.01, lat=46 + j * 0.01))
+    lignes += [dict(code=f"U{j}", dep="99", pop=90000, epci="URB", rural=False, score=90, lon=3, lat=46) for j in range(15)]
+    c = pd.DataFrame(lignes)
+    choix = exemples.choisir_epci(c, n=4)
+    assert len(choix) == 4 and "URB" not in choix and choix[0] == "E5"
+    lons = sorted(c[c.epci.isin(choix)].groupby("epci").lon.mean())
+    assert lons[1] - lons[0] >= 2.0 - 1e-6  # espaces
+
+
+def test_geojson_et_altitudes_sans_tuile():
+    els = reseau_grille()
+    coords, _ = exemples.aretes_osm(els)
+    alt = exemples.altitudes(coords, tuile_png=lambda x, y, z: None)
+    assert set(alt) == set(coords) and all(v == 0 for v in alt.values())
+    hub, traces = exemples.exemples_epci("E", communes_test(), tuile_png=lambda x, y, z: None, reseau=lambda bbox: els)
+    gj = exemples.vers_geojson([("E", "EPCI test", hub, traces, dict(communes_epci=5, pop_epci=4900, score_moyen=60, traces=len(traces)))])
+    types = {f["properties"]["type"] for f in gj["features"]}
+    assert types == {"pole", "trace"} and hub.nom == "Commune A"

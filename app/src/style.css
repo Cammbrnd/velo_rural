@@ -52,9 +52,13 @@ td.num, th.num { text-align: right; }
 .barre .rail b { position: absolute; left: 0; top: 0; bottom: 0; background: var(--serie); border-radius: 3px; }
 .barre .val { text-align: right; color: var(--ink-2); }
 .barre .nd { color: var(--ink-3); }
-.infobulle { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--axe); border-radius: 6px; padding: 6px 8px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.12); z-index: 5; transform: translate(12px, 12px); display: none; }
+.infobulle { max-width: 340px; position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--axe); border-radius: 6px; padding: 6px 8px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.12); z-index: 5; transform: translate(12px, 12px); display: none; }
 .infobulle b { display: block; }
 .erreur { color: #b42318; padding: 16px; }
 @media (max-width: 800px) { #app { grid-template-columns: 1fr; grid-template-rows: 55vh 45vh; } #carte { order: -1; } #panneau { border-right: 0; border-top: 1px solid var(--ligne); } }
 
 .alerte { position: absolute; left: 12px; top: 12px; right: 60px; z-index: 6; display: none; background: #fdecea; border: 1px solid #f1aeb5; color: #7a1c14; padding: 8px 10px; border-radius: 6px; font-size: 12px; }
+
+.legende-ex { list-style: none; padding: 0; margin: 6px 0 0; font-size: 12px; }
+.legende-ex li { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+.legende-ex i { display: inline-block; width: 22px; height: 4px; border-radius: 2px; }

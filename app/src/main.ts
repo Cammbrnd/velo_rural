@@ -3,7 +3,7 @@ import type { StyleSpecification } from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./style.css";
-import { chargerConfig, chargerDonnees } from "./data";
+import { chargerConfig, chargerDonnees, chargerExemples } from "./data";
 import { GRILLE_RURAL_MIN } from "./indicators";
 import { monterPanneau, type Etat } from "./panel";
 import { exprCouleur, poidsParDefaut, scoreMode, type Ligne } from "./score";
@@ -18,6 +18,7 @@ async function demarrer() {
   const panneau = document.getElementById("panneau")!;
   const cfg = await chargerConfig();
   const { geojson, table } = await chargerDonnees(cfg);
+  const exemples = await chargerExemples(cfg);
 
   const etat: Etat = { mode: "global", rural: true, poids: poidsParDefaut() };
 
@@ -88,12 +89,13 @@ async function demarrer() {
       paint: { "line-color": "#0b0b0b", "line-width": 2.5 },
     } as never);
     recolorer();
+    if (exemples && exemples.features.length) monterExemples(carte, exemples, infobulle);
   });
 
   // infobulle au survol
   carte.on("mousemove", "communes-fill", (e) => {
     const f = e.features?.[0];
-    if (!f) return;
+    if (!f || surExemple) return;
     const p = f.properties as Ligne;
     const s = scoreMode(p, etat.mode, etat.poids);
     infobulle.innerHTML = `<b></b><span></span>`;
@@ -115,6 +117,80 @@ async function demarrer() {
     ui.selectionner(code);
     carte.setFilter("communes-sel", ["==", ["get", "code"], code] as never);
   });
+}
+
+let surExemple = false; // vrai quand la souris est sur un trace d'exemple (son infobulle prime sur celle de la commune)
+
+const COULEURS_CAT: Record<string, string> = { existant: "#1a9850", calme: "#f2a900", a_securiser: "#d7191c" };
+
+function monterExemples(carte: maplibregl.Map, fc: GeoJSON.FeatureCollection, infobulle: HTMLElement) {
+  carte.addSource("exemples", { type: "geojson", data: fc });
+  carte.addLayer({ id: "exemples-fond", type: "line", source: "exemples", filter: ["==", ["get", "type"], "trace"],
+    layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#ffffff", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 3, 11, 8] } } as never);
+  carte.addLayer({ id: "exemples-trait", type: "line", source: "exemples", filter: ["==", ["get", "type"], "trace"],
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": ["match", ["get", "categorie"], "existant", COULEURS_CAT.existant, "calme", COULEURS_CAT.calme, COULEURS_CAT.a_securiser],
+      "line-width": ["interpolate", ["linear"], ["zoom"], 5, 1.6, 11, 4.5] } } as never);
+  carte.addLayer({ id: "exemples-poles", type: "circle", source: "exemples", filter: ["==", ["get", "type"], "pole"],
+    paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 4, 11, 8], "circle-color": "#0b0b0b", "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } } as never);
+
+  const bloc = document.getElementById("exemples-bloc");
+  const voir = document.getElementById("exemples-voir") as HTMLInputElement | null;
+  const choix = document.getElementById("exemples-choix") as HTMLSelectElement | null;
+  if (bloc) bloc.hidden = false;
+  const couches = ["exemples-fond", "exemples-trait", "exemples-poles"];
+  voir?.addEventListener("change", () => couches.forEach((id) => carte.setLayoutProperty(id, "visibility", voir.checked ? "visible" : "none")));
+
+  const poles = fc.features.filter((f) => f.properties?.type === "pole");
+  poles.sort((a, b) => String(a.properties?.epci_nom).localeCompare(String(b.properties?.epci_nom), "fr"));
+  for (const f of poles) {
+    const o = document.createElement("option");
+    o.value = String(f.properties?.epci);
+    o.textContent = String(f.properties?.epci_nom);
+    choix?.appendChild(o);
+  }
+  choix?.addEventListener("change", () => {
+    if (!choix.value) return;
+    const b = new maplibregl.LngLatBounds();
+    const etendre = (c: unknown): void => {
+      if (Array.isArray(c) && typeof c[0] === "number") b.extend(c as [number, number]);
+      else (c as unknown[]).forEach(etendre);
+    };
+    for (const f of fc.features) if (f.properties?.epci === choix.value) etendre((f.geometry as GeoJSON.LineString | GeoJSON.Point).coordinates);
+    if (!b.isEmpty()) carte.fitBounds(b, { padding: 60, maxZoom: 12 });
+  });
+
+  const ligne = (el: HTMLElement, titre: string, texte: string) => {
+    el.replaceChildren();
+    const b = document.createElement("b");
+    b.textContent = titre;
+    const s = document.createElement("span");
+    s.textContent = texte;
+    el.append(b, s);
+  };
+  const survol = (e: maplibregl.MapLayerMouseEvent) => {
+    const p = e.features?.[0]?.properties;
+    if (!p) return;
+    surExemple = true;
+    if (p.type === "pole") {
+      ligne(infobulle, `${p.epci_nom} — pôle : ${p.pole}`, `${p.communes_epci} communes, ${Number(p.pop_epci).toLocaleString("fr-FR")} hab., ${p.traces} tracés proposés`);
+    } else {
+      ligne(infobulle, `${p.epci_nom} — tracé ${p.trace} depuis ${p.pole}`,
+        `${p.longueur_km} km (${p.km_existant} existants, ${p.km_calme} routes calmes, ${p.km_a_securiser} à sécuriser) · ${p.communes} communes, ${Number(p.pop_desservie).toLocaleString("fr-FR")} hab. · dénivelé + ${p.denivele_positif_m} m`);
+    }
+    infobulle.style.left = e.point.x + "px";
+    infobulle.style.top = e.point.y + "px";
+    infobulle.style.display = "block";
+    carte.getCanvas().style.cursor = "pointer";
+  };
+  for (const id of ["exemples-trait", "exemples-poles"]) {
+    carte.on("mousemove", id, survol);
+    carte.on("mouseleave", id, () => {
+      surExemple = false;
+      infobulle.style.display = "none";
+      carte.getCanvas().style.cursor = "";
+    });
+  }
 }
 
 demarrer().catch((err) => {

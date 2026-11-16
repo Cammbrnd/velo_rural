@@ -44,7 +44,7 @@ export const INDICATEURS: Indicateur[] = [
     description: "Densité de population", source: "TBMD / INSEE" },
   { id: "i_peu_motorises", axe: "usage", label: "Ménages peu motorisés", poids: 1,
     description: "Part des ménages avec 0 ou 1 voiture", source: "TBMD / INSEE" },
-  { id: "i_relief", axe: "usage", label: "Relief favorable", poids: 2,
+  { id: "i_relief", axe: "usage", label: "Relief favorable", poids: 4,
     description: "Pente moyenne communale (faible pente = favorable)", source: "MNT IGN (RGE ALTI)" },
   { id: "i_climat", axe: "usage", label: "Climat favorable", poids: 1,
     description: "Nombre de jours de pluie et de gel (faible = favorable)", source: "Meteo-France / SAFRAN" },
