@@ -137,3 +137,30 @@ def test_longueur_sur_surfaces_utilise_le_contour(communes, tmp_path, monkeypatc
     monkeypatch.setattr(couches, "telecharger", lambda url, dest: f)
     s, _ = couches.indicateur_couche("i_canaux", dict(mode="longueur", transfo="presence"), communes, tmp_path)
     assert s["03001"] == 100.0 and pd.isna(s["03002"])
+
+
+def test_routes_calmes_regles_etiquettes():
+    cas = [("track", '"tracktype"=>"grade1"'), ("track", '"tracktype"=>"grade4"'), ("track", '"surface"=>"asphalt"'),
+           ("residential", '"bicycle"=>"no"'), ("unclassified", '"access"=>"private"'), ("living_street", None),
+           ("unclassified", '"maxspeed"=>"80"'), ("tertiary", None), ("path", '"bicycle"=>"yes"')]
+    h = pd.Series([c[0] for c in cas])
+    tags = pd.Series([c[1] for c in cas])
+    assert routes_calmes.est_calme(h, tags).tolist() == [True, False, True, False, False, True, False, False, False]
+
+
+def test_routes_calmes_lecture_osm_et_densite(tmp_path):
+    """Lit un vrai fichier .osm (pilote GDAL) : seules les voies calmes comptent dans la commune."""
+    osm = tmp_path / "t.osm"
+    noeuds = {1: (3.02, 46.05), 2: (3.08, 46.05), 3: (3.02, 46.06), 4: (3.08, 46.06), 5: (3.02, 46.07), 6: (3.08, 46.07)}
+    xml = ['<?xml version="1.0"?>', '<osm version="0.6">']
+    xml += [f'<node id="{i}" lat="{la}" lon="{lo}"/>' for i, (lo, la) in noeuds.items()]
+    voies = [(10, 1, 2, [("highway", "residential")]), (11, 3, 4, [("highway", "primary")]),
+             (12, 5, 6, [("highway", "tertiary"), ("maxspeed", "80")])]
+    for wid, a, b, tags in voies:
+        xml.append(f'<way id="{wid}"><nd ref="{a}"/><nd ref="{b}"/>' + "".join(f'<tag k="{k}" v="{v}"/>' for k, v in tags) + "</way>")
+    xml.append("</osm>")
+    osm.write_text("\n".join(xml), encoding="utf-8")
+    communes = gpd.GeoDataFrame({"code": ["03001", "03002"], "geometry": [box(3.0, 46.0, 3.1, 46.1), box(3.2, 46.0, 3.3, 46.1)]}, crs=4326)
+    km = routes_calmes.routes_calmes_region(osm, communes)
+    assert 4.0 < km["03001"] < 5.0
+    assert km.get("03002", 0) == 0

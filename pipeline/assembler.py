@@ -1,5 +1,6 @@
 """Etape 2 : assemble les indicateurs par commune, les oriente (100 = favorable), normalise en percentiles."""
 import re
+from pathlib import Path
 
 import pandas as pd
 
@@ -117,10 +118,11 @@ def indicateurs_geo(communes, dossier):
     table, rapport = couches.construire_couches(cfg.COUCHES, communes, dossier)
     extras = [("i_securite", lambda: securite.indicateur_securite(communes, dossier)),
               ("i_relief", lambda: relief.indicateur_relief(communes, dossier))]
-    if cfg.ROUTES_CALMES:
-        extras.append(("i_routes_calmes", lambda: routes_calmes.indicateur_routes_calmes(communes, dossier)))
+    cache_rc = Path(dossier) / "routes_calmes.csv"
+    if cfg.ROUTES_CALMES or cache_rc.exists():  # calcul force, ou resultat deja en cache
+        extras.append(("i_routes_calmes", lambda: routes_calmes.indicateur_routes_calmes(communes, dossier, recalculer=cfg.ROUTES_CALMES)))
     else:
-        rapport.append(("i_routes_calmes", "DESACTIVE", "lourd (OSM) : lancer avec ROUTES_CALMES=1"))
+        rapport.append(("i_routes_calmes", "DESACTIVE", "lourd (OSM) : lancer le workflow avec routes_calmes=true"))
     series = []
     for nom, f in extras:
         try:

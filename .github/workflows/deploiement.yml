@@ -46,10 +46,19 @@ jobs:
         with:
           path: pipeline/donnees_brutes
           key: brut-v2-${{ steps.mois.outputs.mois }}
+      - name: Cache du resultat des routes calmes (calcul lourd, recalcule chaque mois par le declenchement planifie)
+        uses: actions/cache@v4
+        with:
+          path: pipeline/donnees_brutes/routes_calmes.csv
+          key: routes-calmes-v1-${{ steps.mois.outputs.mois }}
+          restore-keys: routes-calmes-v1-
+      - name: Outil osmium (pre-filtrage des extraits OSM)
+        if: ${{ inputs.routes_calmes || github.event_name == 'schedule' }}
+        run: sudo apt-get install -y -q osmium-tool
       - name: Pipeline (telechargement, assemblage, export)
         working-directory: pipeline
         env:
-          ROUTES_CALMES: ${{ inputs.routes_calmes && '1' || '0' }}
+          ROUTES_CALMES: ${{ (inputs.routes_calmes || github.event_name == 'schedule') && '1' || '0' }}
         run: python lancer.py
       - name: Rapport du pipeline dans le resume du job
         if: always()
