@@ -13,7 +13,7 @@ export interface Config {
 const base = import.meta.env.BASE_URL;
 
 export async function chargerConfig(): Promise<Config> {
-  const r = await fetch(base + "config.json");
+  const r = await fetch(base + "config.json?t=" + Date.now(), { cache: "no-store" }); // jamais en cache : il porte les numeros de version des autres fichiers
   if (!r.ok) throw new Error("config.json introuvable");
   return r.json();
 }

@@ -14,6 +14,14 @@ const FOND_IGN =
 
 maplibregl.setWorkerUrl(new URL(import.meta.env.BASE_URL + "maplibre/maplibre-gl-worker.mjs", window.location.href).href);
 
+// URL absolue d'un PMTiles + marque propre a ce chargement : un navigateur de bureau qui garde en cache d'anciens octets
+// (requetes Range d'un fichier remplace depuis) ne peut plus les melanger avec le nouveau fichier ("Decoding failed")
+const urlPmtiles = (u: string) => {
+  const url = new URL(u, window.location.href);
+  url.searchParams.set("s", String(Date.now()));
+  return "pmtiles://" + url.href;
+};
+
 async function demarrer() {
   const panneau = document.getElementById("panneau")!;
   const cfg = await chargerConfig();
@@ -74,7 +82,7 @@ async function demarrer() {
       carte.addSource("communes", { type: "geojson", data: geojson as GeoJSON.FeatureCollection });
     } else {
       // URL absolue : indispensable sous un sous-chemin (ex. GitHub Pages /depot/)
-      carte.addSource("communes", { type: "vector", url: "pmtiles://" + new URL(cfg.source.url, window.location.href).href });
+      carte.addSource("communes", { type: "vector", url: urlPmtiles(cfg.source.url) });
     }
     carte.addLayer({
       id: "communes-fill", type: "fill", source: "communes", ...couche,
@@ -89,12 +97,12 @@ async function demarrer() {
       paint: { "line-color": "#0b0b0b", "line-width": 2.5 },
     } as never);
     if (cfg.epci) {
-      carte.addSource("epci", { type: "vector", url: "pmtiles://" + new URL(cfg.epci, window.location.href).href });
+      carte.addSource("epci", { type: "vector", url: urlPmtiles(cfg.epci) });
       carte.addLayer({ id: "epci-trait", type: "line", source: "epci", "source-layer": "epci",
         paint: { "line-color": "#0b0b0b", "line-opacity": 0.75, "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.4, 8, 1.2, 11, 2.2] } } as never);
     }
     if (cfg.pistes) {
-      carte.addSource("pistes", { type: "vector", url: "pmtiles://" + new URL(cfg.pistes, window.location.href).href });
+      carte.addSource("pistes", { type: "vector", url: urlPmtiles(cfg.pistes) });
       carte.addLayer({ id: "pistes-fond", type: "line", source: "pistes", "source-layer": "pistes", minzoom: 7,
         layout: { "line-cap": "round" }, paint: { "line-color": "#ffffff", "line-opacity": 0.8, "line-width": ["interpolate", ["linear"], ["zoom"], 7, 2, 12, 5] } } as never);
       carte.addLayer({ id: "pistes-trait", type: "line", source: "pistes", "source-layer": "pistes", minzoom: 7,
