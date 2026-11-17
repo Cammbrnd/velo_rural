@@ -115,9 +115,9 @@ def test_lignes_vers_aretes_et_regions():
     assert 1 <= len(t) <= 3 and t[0]["props"]["communes"] >= 2
     hub, tr = exemples.exemples_epci("E", communes_test(), tuile_png=lambda x, y, z: None, lignes=lignes)
     assert hub.nom == "Commune A" and tr
-    regs = {"ouest": ("u1", box(-5, 40, 2, 52)), "est": ("u2", box(2, 40, 10, 52))}
-    plan = exemples.regions_pour({"X": (1.5, 45, 2.5, 46), "Y": (5, 45, 5.5, 46)}, regs)
-    assert dict(plan) == {"ouest": ["X"], "est": ["X", "Y"]}
+    assert len(exemples.DEP_REGION) == 96
+    plan = exemples.regions_pour({"X": {"03", "63"}, "Y": {"2A"}, "Z": {"63", "15"}})
+    assert dict(plan) == {"auvergne": ["X", "Z"], "corse": ["Y"]}
     ot = '"bicycle"=>"no"'
     g2 = lignes.copy(); g2["other_tags"] = ot
     assert exemples.lignes_vers_aretes(g2)[1] == []

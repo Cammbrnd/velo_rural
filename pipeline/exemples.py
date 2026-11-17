@@ -147,25 +147,24 @@ def aretes_osm(elements):
     return coords, aretes
 
 
-def regions_france():
-    """Regions Geofabrik de France metropolitaine : {id: (url pbf, polygone)} depuis l'index (avec geometries)."""
-    idx = get_json("https://download.geofabrik.de/index-v1.json", None, essais=8, pause=15)
-    out = {}
-    for f in idx["features"]:
-        p = f["properties"]
-        if p.get("parent") == "france" and p.get("urls", {}).get("pbf") and not re.search(r"guadeloupe|martinique|guyane|reunion|mayotte", p["id"]):
-            out[p["id"]] = (p["urls"]["pbf"], shape(f["geometry"]))
-    return out
+REGIONS_DEP = {
+    "alsace": "67 68", "aquitaine": "24 33 40 47 64", "auvergne": "03 15 43 63", "basse-normandie": "14 50 61",
+    "bourgogne": "21 58 71 89", "bretagne": "22 29 35 56", "centre": "18 28 36 37 41 45", "champagne-ardenne": "08 10 51 52",
+    "corse": "2A 2B", "franche-comte": "25 39 70 90", "haute-normandie": "27 76", "ile-de-france": "75 77 78 91 92 93 94 95",
+    "languedoc-roussillon": "11 30 34 48 66", "limousin": "19 23 87", "lorraine": "54 55 57 88",
+    "midi-pyrenees": "09 12 31 32 46 65 81 82", "nord-pas-de-calais": "59 62", "pays-de-la-loire": "44 49 53 72 85",
+    "picardie": "02 60 80", "poitou-charentes": "16 17 79 86", "provence-alpes-cote-d-azur": "04 05 06 13 83 84",
+    "rhone-alpes": "01 07 26 38 42 69 73 74",
+}
+DEP_REGION = {d: r for r, ds in REGIONS_DEP.items() for d in ds.split()}
 
 
-def regions_pour(emprises, regions):
-    """emprises {epci: (lon min, lat min, lon max, lat max)} -> {region: [epci...]} (regions dont le polygone touche l'emprise)."""
+def regions_pour(deps):
+    """{epci: {departements}} -> {region Geofabrik: [epci...]} (mapping statique, sans appel a l'index Geofabrik)."""
     out = defaultdict(list)
-    for epci, b in emprises.items():
-        zone = box(*b)
-        for nom, (_url, poly) in regions.items():
-            if poly.intersects(zone):
-                out[nom].append(epci)
+    for epci, ds in deps.items():
+        for r in sorted({DEP_REGION[d] for d in ds if d in DEP_REGION}):
+            out[r].append(epci)
     return out
 
 
@@ -199,15 +198,24 @@ def extraire_reseau(pbf, bbox, tmp, nom, marge=0.03):
     return g if len(g) else None
 
 
-def reseaux_geofabrik(emprises):
+def reseaux_geofabrik(emprises, deps):
     """{epci: GeoDataFrame de voies} pour toutes les emprises, region par region (un telechargement par region)."""
-    regions = regions_france()
-    plan = regions_pour(emprises, regions)
+    plan = regions_pour(deps)
     log(f"  reseaux OSM : {len(plan)} regions a lire ({', '.join(sorted(plan))})")
     morceaux = defaultdict(list)
     with tempfile.TemporaryDirectory() as tmp:
         for nom, epcis in plan.items():
-            pbf = telecharger(regions[nom][0], Path(tmp) / f"{nom}.osm.pbf")
+            pbf = None
+            for essai in range(1, 5):
+                try:
+                    pbf = telecharger(f"{cfg.GEOFABRIK}/{nom}-latest.osm.pbf", Path(tmp) / f"{nom}.osm.pbf")
+                    break
+                except requests.RequestException as e:
+                    log(f"  [!] {nom} : essai {essai}/4 echoue ({type(e).__name__})")
+                    (Path(tmp) / f"{nom}.osm.pbf").unlink(missing_ok=True)
+                    time.sleep(15 * essai)
+            if pbf is None:
+                continue
             for epci in epcis:
                 g = extraire_reseau(pbf, emprises[epci], tmp, f"{nom}_{epci}")
                 if g is not None:
@@ -429,7 +437,8 @@ def generer():
     if shutil.which("osmium"):
         emprises = {e: (c[c.epci == e].lon.min(), c[c.epci == e].lat.min(), c[c.epci == e].lon.max(), c[c.epci == e].lat.max()) for e in choix}
         try:
-            reseaux = reseaux_geofabrik(emprises)
+            deps = {e: set(c[c.epci == e].dep.astype(str)) for e in choix}
+            reseaux = reseaux_geofabrik(emprises, deps)
         except Exception as e:  # noqa: BLE001
             log(f"  [!] extraits Geofabrik indisponibles ({type(e).__name__} {e}) : repli sur Overpass")
     else:
@@ -445,14 +454,25 @@ def generer():
             log(f"  {nom} ({code}) : {len(traces)} traces, pole {hub.nom}")
         except Exception as e:  # noqa: BLE001
             log(f"  [!] {nom} ({code}) ignore : {e}")
+    if not resultats:
+        log("[!] aucun exemple produit : exemples.geojson non ecrit")
+        return
     f = cfg.DOSSIER_SORTIE / "exemples.geojson"
     cfg.DOSSIER_SORTIE.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps(vers_geojson(resultats), ensure_ascii=False), encoding="utf-8")
     log(f"ecrit {f} ({f.stat().st_size / 1e3:.0f} ko, {len(resultats)} EPCI)")
 
 
+def forcer_ipv4():
+    """Les runners GitHub renvoient parfois 'Network is unreachable' en IPv6 : on resout en IPv4 uniquement."""
+    import socket
+    import urllib3.util.connection as uc
+    uc.allowed_gai_family = lambda: socket.AF_INET
+
+
 def main():
     """Etape facultative : un echec (Overpass, geo.api...) ne doit pas bloquer le deploiement."""
+    forcer_ipv4()
     try:
         generer()
     except Exception as e:  # noqa: BLE001
