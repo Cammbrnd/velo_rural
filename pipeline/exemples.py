@@ -1,7 +1,7 @@
 """Exemples de trace d'amenagement pour quelques EPCI repartis sur le territoire.
 
 Pour chaque EPCI retenu :
-  1. reseau routier/cyclable OSM (Overpass) ; chaque voie est classee existant / calme / a securiser ;
+  1. reseau routier/cyclable OSM (extraits Geofabrik decoupes par osmium ; repli : Overpass) ; chaque voie est classee existant / calme / a securiser ;
   2. plus courts chemins depuis le pole (commune la plus peuplee), cout = longueur x type de voie + denivele ;
   3. la demande des communes (population x score global) est agregee sur l'arbre des chemins : les axes qui concentrent
      le plus de demande (decomposition en chemins lourds) donnent les 3 traces les plus structurantes.
@@ -11,18 +11,24 @@ import heapq
 import json
 import math
 import os
+import re
+import shutil
+import subprocess
+import tempfile
 import time
 from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
+import geopandas as gpd
 import pandas as pd
 import requests
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString, Point, box, shape
 
 import config as cfg
 import relief
-from outils import log
-from routes_calmes import est_calme_voie
+from outils import log, telecharger
+from routes_calmes import est_calme_voie, etiquettes
 
 OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]
 HIGHWAYS = "residential|living_street|unclassified|tertiary|secondary|track|cycleway|path"
@@ -114,6 +120,8 @@ def telecharger_reseau(bbox, marge=0.03):
 
 
 def categorie(highway, tags):
+    if tags.get("bicycle") in ("no", "dismount") or tags.get("access") in ("no", "private") or tags.get("vehicle") == "no":
+        return None
     if highway == "cycleway" or (highway == "path" and tags.get("bicycle") in ("yes", "designated")):
         return "existant"
     if highway == "path":
@@ -137,6 +145,75 @@ def aretes_osm(elements):
         for i in range(len(pts) - 1):
             aretes.append((w["nodes"][i], w["nodes"][i + 1], 1000 * distance_km(pts[i], pts[i + 1]), cat))
     return coords, aretes
+
+
+def regions_france():
+    """Regions Geofabrik de France metropolitaine : {id: (url pbf, polygone)} depuis l'index (avec geometries)."""
+    idx = requests.get("https://download.geofabrik.de/index-v1.json", timeout=180).json()
+    out = {}
+    for f in idx["features"]:
+        p = f["properties"]
+        if p.get("parent") == "france" and p.get("urls", {}).get("pbf") and not re.search(r"guadeloupe|martinique|guyane|reunion|mayotte", p["id"]):
+            out[p["id"]] = (p["urls"]["pbf"], shape(f["geometry"]))
+    return out
+
+
+def regions_pour(emprises, regions):
+    """emprises {epci: (lon min, lat min, lon max, lat max)} -> {region: [epci...]} (regions dont le polygone touche l'emprise)."""
+    out = defaultdict(list)
+    for epci, b in emprises.items():
+        zone = box(*b)
+        for nom, (_url, poly) in regions.items():
+            if poly.intersects(zone):
+                out[nom].append(epci)
+    return out
+
+
+def lignes_vers_aretes(lignes):
+    """GeoDataFrame [geometry LineString, highway, other_tags] -> coords {noeud: (lon, lat)}, aretes.
+    Les noeuds sont identifies par leurs coordonnees arrondies (les noeuds OSM partages coincident exactement)."""
+    coords, aretes = {}, []
+    for geom, hw, ot in zip(lignes.geometry, lignes["highway"], lignes["other_tags"]):
+        cat = categorie(str(hw), etiquettes(ot))
+        if cat is None or geom is None or geom.is_empty:
+            continue
+        for ligne in (geom.geoms if geom.geom_type == "MultiLineString" else [geom]):
+            pts = [(round(x, 6), round(y, 6)) for x, y in ligne.coords]
+            for a, b in zip(pts[:-1], pts[1:]):
+                if a != b:
+                    coords[a], coords[b] = a, b
+                    aretes.append((a, b, 1000 * distance_km(a, b), cat))
+    return coords, aretes
+
+
+def extraire_reseau(pbf, bbox, tmp, nom, marge=0.03):
+    """osmium : decoupe de l'emprise puis filtre des voies utiles ; lecture GDAL des lignes -> GeoDataFrame (ou None si vide)."""
+    w, s_, e, n = bbox[0] - marge, bbox[1] - marge, bbox[2] + marge, bbox[3] + marge
+    part, filtre = Path(tmp) / f"{nom}.part.osm.pbf", Path(tmp) / f"{nom}.voies.osm.pbf"
+    subprocess.run(["osmium", "extract", "-b", f"{w},{s_},{e},{n}", str(pbf), "-o", str(part), "--overwrite"], check=True)
+    subprocess.run(["osmium", "tags-filter", str(part), *[f"w/highway={h}" for h in HIGHWAYS.split("|")], "-o", str(filtre), "--overwrite"], check=True)
+    sel = ",".join(f"'{h}'" for h in HIGHWAYS.split("|"))
+    g = gpd.read_file(filtre, engine="pyogrio", sql=f"SELECT highway, other_tags FROM lines WHERE highway IN ({sel})")
+    part.unlink(missing_ok=True)
+    filtre.unlink(missing_ok=True)
+    return g if len(g) else None
+
+
+def reseaux_geofabrik(emprises):
+    """{epci: GeoDataFrame de voies} pour toutes les emprises, region par region (un telechargement par region)."""
+    regions = regions_france()
+    plan = regions_pour(emprises, regions)
+    log(f"  reseaux OSM : {len(plan)} regions a lire ({', '.join(sorted(plan))})")
+    morceaux = defaultdict(list)
+    with tempfile.TemporaryDirectory() as tmp:
+        for nom, epcis in plan.items():
+            pbf = telecharger(regions[nom][0], Path(tmp) / f"{nom}.osm.pbf")
+            for epci in epcis:
+                g = extraire_reseau(pbf, emprises[epci], tmp, f"{nom}_{epci}")
+                if g is not None:
+                    morceaux[epci].append(g)
+            pbf.unlink()
+    return {e: pd.concat(m, ignore_index=True) for e, m in morceaux.items()}
 
 
 def altitudes(coords, tuile_png=relief.telecharger_tuile, z=ZOOM_MNT):
@@ -308,9 +385,13 @@ def decrire(coms, coords, alt, noeuds, aretes, nouvelles, lat0, hub):
 
 
 # ------------------------------------------------------------------ orchestration
-def exemples_epci(code, coms, tuile_png=relief.telecharger_tuile, reseau=telecharger_reseau):
-    bbox = (coms.lon.min(), coms.lat.min(), coms.lon.max(), coms.lat.max())
-    coords, aretes = aretes_osm(reseau(bbox))
+def exemples_epci(code, coms, tuile_png=relief.telecharger_tuile, reseau=telecharger_reseau, lignes=None):
+    """`lignes` (GeoDataFrame de voies, extrait Geofabrik) prime ; sinon `reseau(bbox)` interroge Overpass."""
+    if lignes is not None:
+        coords, aretes = lignes_vers_aretes(lignes)
+    else:
+        bbox = (coms.lon.min(), coms.lat.min(), coms.lon.max(), coms.lat.max())
+        coords, aretes = aretes_osm(reseau(bbox))
     alt = altitudes(coords, tuile_png)
     adj = construire_graphe(coords, aretes, alt)
     hub = coms.sort_values("pop", ascending=False).iloc[0]
@@ -344,12 +425,21 @@ def generer():
     forces = [x for x in os.environ.get("EPCI_EXEMPLES", "").split(",") if x]
     choix = forces or choisir_epci(c, 10)
     log(f"exemples : {len(choix)} EPCI retenus : {choix}")
+    reseaux = {}
+    if shutil.which("osmium"):
+        emprises = {e: (c[c.epci == e].lon.min(), c[c.epci == e].lat.min(), c[c.epci == e].lon.max(), c[c.epci == e].lat.max()) for e in choix}
+        try:
+            reseaux = reseaux_geofabrik(emprises)
+        except Exception as e:  # noqa: BLE001
+            log(f"  [!] extraits Geofabrik indisponibles ({type(e).__name__} {e}) : repli sur Overpass")
+    else:
+        log("  osmium absent : repli sur Overpass (public, limite en debit)")
     resultats = []
     for code in choix:
         coms = c[c.epci == code]
         nom = coms.epci_nom.iat[0]
         try:
-            hub, traces = exemples_epci(code, coms)
+            hub, traces = exemples_epci(code, coms, lignes=reseaux.get(code))
             resume = dict(communes_epci=int(len(coms)), pop_epci=int(coms["pop"].sum()), score_moyen=round(float(coms.score.mean()), 0), traces=len(traces))
             resultats.append((code, nom, hub, traces, resume))
             log(f"  {nom} ({code}) : {len(traces)} traces, pole {hub.nom}")

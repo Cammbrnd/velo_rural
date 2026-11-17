@@ -101,3 +101,23 @@ def test_geojson_et_altitudes_sans_tuile():
     gj = exemples.vers_geojson([("E", "EPCI test", hub, traces, dict(communes_epci=5, pop_epci=4900, score_moyen=60, traces=len(traces)))])
     types = {f["properties"]["type"] for f in gj["features"]}
     assert types == {"pole", "trace"} and hub.nom == "Commune A"
+
+
+def test_lignes_vers_aretes_et_regions():
+    import geopandas as gpd
+    from shapely.geometry import LineString, box
+    els = reseau_grille(7)
+    lignes = gpd.GeoDataFrame({"highway": [e["tags"]["highway"] for e in els], "other_tags": [None] * len(els),
+                               "geometry": [LineString([(p["lon"], p["lat"]) for p in e["geometry"]]) for e in els]}, crs=4326)
+    coords, aretes = exemples.lignes_vers_aretes(lignes)
+    adj = exemples.construire_graphe(coords, aretes, {n: 0.0 for n in coords})
+    t = exemples.traces_epci(communes_test(), adj, coords, {n: 0.0 for n in coords}, "A")
+    assert 1 <= len(t) <= 3 and t[0]["props"]["communes"] >= 2
+    hub, tr = exemples.exemples_epci("E", communes_test(), tuile_png=lambda x, y, z: None, lignes=lignes)
+    assert hub.nom == "Commune A" and tr
+    regs = {"ouest": ("u1", box(-5, 40, 2, 52)), "est": ("u2", box(2, 40, 10, 52))}
+    plan = exemples.regions_pour({"X": (1.5, 45, 2.5, 46), "Y": (5, 45, 5.5, 46)}, regs)
+    assert dict(plan) == {"ouest": ["X"], "est": ["X", "Y"]}
+    ot = '"bicycle"=>"no"'
+    g2 = lignes.copy(); g2["other_tags"] = ot
+    assert exemples.lignes_vers_aretes(g2)[1] == []
