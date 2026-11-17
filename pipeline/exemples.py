@@ -28,11 +28,11 @@ from shapely.geometry import LineString, Point, box, shape
 import config as cfg
 import relief
 from outils import log, telecharger
-from routes_calmes import est_calme_voie, etiquettes
+from routes_calmes import est_calme_voie, etiquettes, type_piste
 
 OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]
 HIGHWAYS = "residential|living_street|unclassified|tertiary|secondary|track|cycleway|path"
-FACTEUR = {"existant": 0.8, "calme": 1.0, "a_securiser": 1.8}
+FACTEUR = {"existant": 0.6, "calme": 1.0, "a_securiser": 1.8}
 COUT_MONTEE = 6.0            # m de cout par m de montee (|dz| entre deux noeuds, altitudes lissees)
 PENTE_REF = 0.04             # pente (4 %) a partir de laquelle le cout d'une arete double ; il croit ensuite au carre
 PENTE_MAX_ARETE = 0.15       # arete plus raide (sur >= 40 m) : exclue du graphe
@@ -41,13 +41,18 @@ PENALITE_CHANGEMENT = 250.0  # m de cout a chaque changement de route (nom / ref
 PENALITE_VIRAGE = ((150, math.inf), (120, 150.0), (60, 80.0), (30, 25.0))  # (angle mini en degres, penalite en m)
 RAYON_DESSERTE_M = 600       # une commune est desservie si son bourg est a moins de 600 m de la trace
 SNAP_MAX_M = 2000
-NB_TRACES = 14               # nombre maximal de traces (branches du reseau)
+NB_TRACES = 5                # nombre maximal de traces (branches les plus pertinentes du reseau)
+NB_EPCI = 20
+PISTE_MIN_M = 2000           # une piste existante d'au moins 2 km est un point a rejoindre
+POIDS_PISTE_PAR_KM = 150.0   # poids d'une piste a rejoindre (par km, plafonne a 10 km), a comparer a pop x score/100 des communes
 LONGUEUR_MIN_M = 500         # longueur minimale de la partie nouvelle d'une branche
 LONGUEUR_MAX_M = 25000       # une commune plus loin du pole (par la route) n'est pas reliee
 DETOUR_MAX = 1.8             # longueur par la route / distance a vol d'oiseau
 PENTE_MAX_500M = 0.07        # pente moyenne maximale sur 500 m
 MONTEE_MAX_M_KM = 22.0       # montee cumulee maximale par km
 CHANGEMENTS_MAX_KM = 4.0     # changements de route par km au plus
+RURAL_MIN = 0.95             # part de communes rurales (grille de densite 5 a 7) d'au moins 95 %
+HUB_MAX = 15000              # pole de moins de 15 000 hab. (pas une ville)
 RELIEF_MIN = 45.0            # EPCI retenus : indicateur de relief moyen (0-100, 100 = plat) d'au moins 45 (pas de haute montagne)
 ZOOM_MNT = 11
 
@@ -99,7 +104,7 @@ def choisir_epci(communes, n=10):
         "lon": g["lon"].mean(), "lat": g["lat"].mean(), "dep": g["dep"].agg(lambda s: s.mode().iat[0]),
         "etendue": g.apply(lambda d: distance_km((d.lon.min(), d.lat.min()), (d.lon.max(), d.lat.max())), include_groups=False),
     })
-    cand = e[(e.n.between(12, 60)) & (e.rural >= 0.8) & (e.etendue <= 80) & (e.hub >= 1500) & (e["pop"] >= 8000) & (e.relief >= RELIEF_MIN)].sort_values("score", ascending=False)
+    cand = e[(e.n.between(10, 60)) & (e.rural >= RURAL_MIN) & (e.etendue <= 80) & (e.hub.between(1500, HUB_MAX)) & (e["pop"] >= 8000) & (e.relief >= RELIEF_MIN)].sort_values("score", ascending=False)
     if cand.empty:
         return []
     choix = [cand.index[0]]
@@ -134,7 +139,7 @@ def telecharger_reseau(bbox, marge=0.03):
 def categorie(highway, tags):
     if tags.get("bicycle") in ("no", "dismount") or tags.get("access") in ("no", "private") or tags.get("vehicle") == "no":
         return None
-    if highway == "cycleway" or (highway == "path" and tags.get("bicycle") in ("yes", "designated")):
+    if highway == "cycleway" or (highway == "path" and tags.get("bicycle") in ("yes", "designated")) or type_piste(highway, tags) == "piste":
         return "existant"
     if highway == "path":
         return None
@@ -366,6 +371,27 @@ def grande_composante(G):
     return {x for x in list(pere) if racine(x) == r}
 
 
+def pistes_existantes(G):
+    """Composantes connexes d'amenagements existants (arete 'existant') d'au moins PISTE_MIN_M -> ({noeud: id}, {id: km})."""
+    pere = {}
+
+    def racine(x):
+        while pere.setdefault(x, x) != x:
+            pere[x] = pere[pere[x]]
+            x = pere[x]
+        return x
+
+    for u, v, L, cat, *_ in G.E:
+        if cat == "existant":
+            pere[racine(u)] = racine(v)
+    km = defaultdict(float)
+    for u, v, L, cat, *_ in G.E:
+        if cat == "existant":
+            km[racine(u)] += L / 2000  # chaque arete existe dans les deux sens
+    ok = {r for r, k in km.items() if k * 1000 >= PISTE_MIN_M}
+    return {x: racine(x) for x in list(pere) if racine(x) in ok}, {r: km[r] for r in ok}
+
+
 def chaine(parent, e):
     """Aretes du depart jusqu'a l'arete `e`."""
     out = []
@@ -411,6 +437,17 @@ def traces_epci(coms, G, coords, alt, hub_code, k=NB_TRACES):
         return []
     atteints = {n: coords[n] for n in meilleure}
     poids = defaultdict(float)
+    comp_piste, km_piste = pistes_existantes(G)
+    for cid, km in km_piste.items():  # pistes deja amenagees a rejoindre : on vise leur noeud le plus proche du pole
+        noeuds_c = [n for n in meilleure if comp_piste.get(n) == cid]
+        if not noeuds_c:
+            continue
+        n = min(noeuds_c, key=lambda x: dist[meilleure[x]])
+        ch = chaine(parent, meilleure[n])
+        if sum(E[e][2] for e in ch) < 300 or not accepte(G, alt, ch, 1000 * distance_km((hub.lon, hub.lat), coords[n])):
+            continue
+        for e in ch:
+            poids[e] += POIDS_PISTE_PAR_KM * min(km, 10.0)
     for c in coms.itertuples():
         if c.code == hub_code:
             continue
@@ -446,7 +483,11 @@ def traces_epci(coms, G, coords, alt, hub_code, k=NB_TRACES):
             continue
         utilises |= {frozenset(a[:2]) for a in aretes_chemin}
         noeuds_chemin = [aretes_chemin[0][0]] + [a[1] for a in aretes_chemin]
-        traces.append(decrire(coms, coords, alt, noeuds_chemin, aretes_chemin, nouvelles, lat0, hub))
+        t = decrire(coms, coords, alt, noeuds_chemin, aretes_chemin, nouvelles, lat0, hub)
+        rejointes = {comp_piste[n] for n in noeuds_chemin if n in comp_piste and km_piste.get(comp_piste[n], 0) * 1000 >= PISTE_MIN_M}
+        t["props"]["pistes_rejointes"] = len(rejointes)
+        t["props"]["km_pistes_rejointes"] = round(sum(km_piste[c] for c in rejointes), 1)
+        traces.append(t)
     return traces
 
 
@@ -527,7 +568,7 @@ def generer():
     c = c.merge(indic[["code", "grille", "score"] + (["i_relief"] if "i_relief" in indic.columns else [])].rename(columns={"i_relief": "relief"}), on="code", how="left").merge(table_epci(), on="code", how="left")
     c["rural"] = c["grille"].ge(5)  # grille de densite INSEE 5 a 7
     forces = [x for x in os.environ.get("EPCI_EXEMPLES", "").split(",") if x]
-    choix = forces or choisir_epci(c, 10)
+    choix = forces or choisir_epci(c, NB_EPCI)
     log(f"exemples : {len(choix)} EPCI retenus : {choix}")
     reseaux = {}
     if shutil.which("osmium"):

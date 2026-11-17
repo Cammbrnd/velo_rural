@@ -173,3 +173,24 @@ def test_lissage_altitudes():
     alt = {i: (100.0 if i == 5 else 0.0) for i in range(11)}  # un pic de bruit sur un noeud
     l = exemples.lisser_altitudes(alt, aretes)
     assert max(l.values()) < 60 and abs(sum(l.values()) - 100) < 1e-6 + 40
+
+
+def test_rejoindre_une_piste_existante():
+    sp = {(i, 6, "h"): "cycleway" for i in (3, 4, 5)}  # 3,6 km de piste a l'autre bout, a hauteur de la ligne j=6
+    coords, aretes = exemples.aretes_osm(reseau_grille(7, sp))
+    alt = {n: 0.0 for n in coords}
+    G = exemples.construire_graphe(coords, aretes, alt)
+    comp, km = exemples.pistes_existantes(G)
+    assert len(km) == 1 and 3.5 < list(km.values())[0] < 3.7
+    coms = communes_test()[lambda d: d.code.isin(["A", "E"])]
+    t = exemples.traces_epci(coms, G, coords, alt, "A")
+    assert any(x["props"]["pistes_rejointes"] == 1 for x in t)
+    assert exemples.categorie("residential", {"cycleway:right": "track"}) == "existant"
+    assert exemples.categorie("residential", {"cycleway": "lane"}) == "calme"
+
+
+def test_cinq_branches_au_plus():
+    coords, aretes = exemples.aretes_osm(reseau_grille())
+    alt = {n: 0.0 for n in coords}
+    t = exemples.traces_epci(communes_test(), exemples.construire_graphe(coords, aretes, alt), coords, alt, "A")
+    assert 1 <= len(t) <= 5
