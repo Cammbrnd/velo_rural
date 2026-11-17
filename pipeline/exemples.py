@@ -33,11 +33,22 @@ from routes_calmes import est_calme_voie, etiquettes
 OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]
 HIGHWAYS = "residential|living_street|unclassified|tertiary|secondary|track|cycleway|path"
 FACTEUR = {"existant": 0.8, "calme": 1.0, "a_securiser": 1.8}
-COUT_DENIVELE = 4.0          # metres de cout par metre de denivele (|dz| entre deux noeuds)
+COUT_MONTEE = 6.0            # m de cout par m de montee (|dz| entre deux noeuds, altitudes lissees)
+PENTE_REF = 0.04             # pente (4 %) a partir de laquelle le cout d'une arete double ; il croit ensuite au carre
+PENTE_MAX_ARETE = 0.15       # arete plus raide (sur >= 40 m) : exclue du graphe
+L_MIN_PENTE = 40.0           # longueur minimale pour calculer une pente (le MNT est a ~50 m)
+PENALITE_CHANGEMENT = 250.0  # m de cout a chaque changement de route (nom / ref / voie OSM differents) : evite les zigzags
+PENALITE_VIRAGE = ((150, math.inf), (120, 150.0), (60, 80.0), (30, 25.0))  # (angle mini en degres, penalite en m)
 RAYON_DESSERTE_M = 600       # une commune est desservie si son bourg est a moins de 600 m de la trace
 SNAP_MAX_M = 2000
-NB_TRACES = 3
-LONGUEUR_MIN_M = 2500
+NB_TRACES = 14               # nombre maximal de traces (branches du reseau)
+LONGUEUR_MIN_M = 500         # longueur minimale de la partie nouvelle d'une branche
+LONGUEUR_MAX_M = 25000       # une commune plus loin du pole (par la route) n'est pas reliee
+DETOUR_MAX = 1.8             # longueur par la route / distance a vol d'oiseau
+PENTE_MAX_500M = 0.07        # pente moyenne maximale sur 500 m
+MONTEE_MAX_M_KM = 22.0       # montee cumulee maximale par km
+CHANGEMENTS_MAX_KM = 4.0     # changements de route par km au plus
+RELIEF_MIN = 45.0            # EPCI retenus : indicateur de relief moyen (0-100, 100 = plat) d'au moins 45 (pas de haute montagne)
 ZOOM_MNT = 11
 
 
@@ -83,11 +94,12 @@ def choisir_epci(communes, n=10):
     par echantillonnage du plus eloigne (un par departement) ; le premier est celui de meilleur score moyen."""
     g = communes.dropna(subset=["epci"]).groupby("epci")
     e = pd.DataFrame({
+        "relief": g["relief"].mean() if "relief" in communes.columns else 100.0,
         "n": g.size(), "pop": g["pop"].sum(), "rural": g["rural"].mean(), "score": g["score"].mean(), "hub": g["pop"].max(),
         "lon": g["lon"].mean(), "lat": g["lat"].mean(), "dep": g["dep"].agg(lambda s: s.mode().iat[0]),
         "etendue": g.apply(lambda d: distance_km((d.lon.min(), d.lat.min()), (d.lon.max(), d.lat.max())), include_groups=False),
     })
-    cand = e[(e.n.between(12, 60)) & (e.rural >= 0.8) & (e.etendue <= 80) & (e.hub >= 1500) & (e["pop"] >= 8000)].sort_values("score", ascending=False)
+    cand = e[(e.n.between(12, 60)) & (e.rural >= 0.8) & (e.etendue <= 80) & (e.hub >= 1500) & (e["pop"] >= 8000) & (e.relief >= RELIEF_MIN)].sort_values("score", ascending=False)
     if cand.empty:
         return []
     choix = [cand.index[0]]
@@ -129,8 +141,13 @@ def categorie(highway, tags):
     return "calme" if est_calme_voie(highway, tags) else "a_securiser"
 
 
+def cle_route(tags, ident):
+    """Identite d'une route pour detecter les changements de route : ref, sinon nom, sinon voie OSM."""
+    return tags.get("ref") or tags.get("name") or f"w{ident}"
+
+
 def aretes_osm(elements):
-    """-> coords {id: (lon, lat)}, aretes [(u, v, longueur_m, categorie)] entre noeuds OSM consecutifs."""
+    """-> coords {id: (lon, lat)}, aretes [(u, v, longueur_m, categorie, route)] entre noeuds OSM consecutifs."""
     coords, aretes = {}, []
     for w in elements:
         if w.get("type") != "way" or "geometry" not in w:
@@ -140,10 +157,11 @@ def aretes_osm(elements):
         if cat is None or len(w["nodes"]) != len(w["geometry"]):
             continue
         pts = [(p["lon"], p["lat"]) for p in w["geometry"]]
+        route = cle_route(tags, w.get("id"))
         for i, nid in enumerate(w["nodes"]):
             coords[nid] = pts[i]
         for i in range(len(pts) - 1):
-            aretes.append((w["nodes"][i], w["nodes"][i + 1], 1000 * distance_km(pts[i], pts[i + 1]), cat))
+            aretes.append((w["nodes"][i], w["nodes"][i + 1], 1000 * distance_km(pts[i], pts[i + 1]), cat, route))
     return coords, aretes
 
 
@@ -169,19 +187,22 @@ def regions_pour(deps):
 
 
 def lignes_vers_aretes(lignes):
-    """GeoDataFrame [geometry LineString, highway, other_tags] -> coords {noeud: (lon, lat)}, aretes.
+    """GeoDataFrame [geometry LineString, highway, other_tags, (name)] -> coords {noeud: (lon, lat)}, aretes.
     Les noeuds sont identifies par leurs coordonnees arrondies (les noeuds OSM partages coincident exactement)."""
     coords, aretes = {}, []
-    for geom, hw, ot in zip(lignes.geometry, lignes["highway"], lignes["other_tags"]):
-        cat = categorie(str(hw), etiquettes(ot))
+    noms = lignes["name"] if "name" in lignes.columns else [None] * len(lignes)
+    for k, (geom, hw, ot, nom) in enumerate(zip(lignes.geometry, lignes["highway"], lignes["other_tags"], noms)):
+        tags = etiquettes(ot)
+        cat = categorie(str(hw), tags)
         if cat is None or geom is None or geom.is_empty:
             continue
+        route = cle_route({**tags, "name": nom if isinstance(nom, str) else None}, k)
         for ligne in (geom.geoms if geom.geom_type == "MultiLineString" else [geom]):
             pts = [(round(x, 6), round(y, 6)) for x, y in ligne.coords]
             for a, b in zip(pts[:-1], pts[1:]):
                 if a != b:
                     coords[a], coords[b] = a, b
-                    aretes.append((a, b, 1000 * distance_km(a, b), cat))
+                    aretes.append((a, b, 1000 * distance_km(a, b), cat, route))
     return coords, aretes
 
 
@@ -192,7 +213,7 @@ def extraire_reseau(pbf, bbox, tmp, nom, marge=0.03):
     subprocess.run(["osmium", "extract", "-b", f"{w},{s_},{e},{n}", str(pbf), "-o", str(part), "--overwrite"], check=True)
     subprocess.run(["osmium", "tags-filter", str(part), *[f"w/highway={h}" for h in HIGHWAYS.split("|")], "-o", str(filtre), "--overwrite"], check=True)
     sel = ",".join(f"'{h}'" for h in HIGHWAYS.split("|"))
-    g = gpd.read_file(filtre, engine="pyogrio", sql=f"SELECT highway, other_tags FROM lines WHERE highway IN ({sel})")
+    g = gpd.read_file(filtre, engine="pyogrio", sql=f"SELECT highway, name, other_tags FROM lines WHERE highway IN ({sel})")
     part.unlink(missing_ok=True)
     filtre.unlink(missing_ok=True)
     return g if len(g) else None
@@ -245,27 +266,75 @@ def altitudes(coords, tuile_png=relief.telecharger_tuile, z=ZOOM_MNT):
 
 
 # ------------------------------------------------------------------ graphe et traces
+def lisser_altitudes(alt, aretes, passes=3):
+    """Lissage des altitudes le long du reseau (le MNT a ~50 m rend les pentes des aretes courtes tres bruitees)."""
+    if not aretes:
+        return dict(alt)
+    ids = list(alt)
+    idx = {n: i for i, n in enumerate(ids)}
+    z = np.array([alt[n] for n in ids], dtype=float)
+    u = np.fromiter((idx[a[0]] for a in aretes), dtype=int, count=len(aretes))
+    v = np.fromiter((idx[a[1]] for a in aretes), dtype=int, count=len(aretes))
+    deg = np.bincount(u, minlength=len(ids)) + np.bincount(v, minlength=len(ids))
+    for _ in range(passes):
+        som = np.bincount(u, weights=z[v], minlength=len(ids)) + np.bincount(v, weights=z[u], minlength=len(ids))
+        z = np.where(deg > 0, 0.5 * z + 0.5 * som / np.maximum(deg, 1), z)
+    return dict(zip(ids, z.tolist()))
+
+
+class Graphe:
+    """Graphe d'aretes orientees. Un etat de Dijkstra est une arete orientee : on connait ainsi la route empruntee et la
+    direction d'arrivee, donc on peut penaliser les changements de route et les virages (traces en zigzag)."""
+
+    def __init__(self, coords, aretes, alt):
+        self.coords = coords
+        lat0 = float(np.mean([p[1] for p in coords.values()])) if coords else 46.0
+        kx, ky = 111.32 * math.cos(math.radians(lat0)), 110.54
+        self.E = []  # (u, v, longueur, categorie, route, cout, ux, uy)
+        self.sortant = defaultdict(list)
+        for u, v, L, cat, route in aretes:
+            dz = alt.get(v, 0.0) - alt.get(u, 0.0)
+            g = abs(dz) / max(L, L_MIN_PENTE)
+            if g > PENTE_MAX_ARETE:
+                continue  # trop raide : personne n'y passera a velo
+            cout = L * FACTEUR[cat] * (1 + (g / PENTE_REF) ** 2) + COUT_MONTEE * abs(dz)
+            dx, dy = (coords[v][0] - coords[u][0]) * kx, (coords[v][1] - coords[u][1]) * ky
+            n = math.hypot(dx, dy) or 1.0
+            for a, b, sx, sy in ((u, v, dx / n, dy / n), (v, u, -dx / n, -dy / n)):
+                self.sortant[a].append(len(self.E))
+                self.E.append((a, b, L, cat, route, cout, sx, sy))
+
+    def penalite(self, e, f):
+        a, b = self.E[e], self.E[f]
+        angle = math.degrees(math.acos(max(-1.0, min(1.0, a[6] * b[6] + a[7] * b[7]))))  # 0 = tout droit
+        pen = next((p for seuil, p in PENALITE_VIRAGE if angle >= seuil), 0.0)
+        return pen + (PENALITE_CHANGEMENT if a[4] != b[4] else 0.0)
+
+
 def construire_graphe(coords, aretes, alt):
-    adj = defaultdict(list)
-    for u, v, L, cat in aretes:
-        c = L * FACTEUR[cat] + COUT_DENIVELE * abs(alt.get(u, 0) - alt.get(v, 0))
-        adj[u].append((v, c, L, cat))
-        adj[v].append((u, c, L, cat))
-    return adj
+    return Graphe(coords, aretes, alt)
 
 
-def dijkstra(adj, source):
-    dist, parent = {source: 0.0}, {source: None}
-    file = [(0.0, source)]
+def dijkstra(G, source, horizon=4 * LONGUEUR_MAX_M):
+    """Plus courts chemins depuis `source` sur les aretes orientees -> (dist, parent) indexes par arete (parent -1 = depart)."""
+    E = G.E
+    dist, parent = [math.inf] * len(E), [-1] * len(E)
+    file = []
+    for e in G.sortant.get(source, ()):
+        dist[e] = E[e][5]
+        heapq.heappush(file, (dist[e], e))
     while file:
-        d, u = heapq.heappop(file)
-        if d > dist[u]:
+        d, e = heapq.heappop(file)
+        if d > dist[e]:
             continue
-        for v, c, _L, _cat in adj[u]:
-            nd = d + c
-            if nd < dist.get(v, math.inf):
-                dist[v], parent[v] = nd, u
-                heapq.heappush(file, (nd, v))
+        for f in G.sortant.get(E[e][1], ()):
+            pen = G.penalite(e, f)
+            if pen == math.inf:
+                continue
+            nd = d + E[f][5] + pen
+            if nd < dist[f] and nd < horizon:
+                dist[f], parent[f] = nd, e
+                heapq.heappush(file, (nd, f))
     return dist, parent
 
 
@@ -277,83 +346,106 @@ def plus_proche(coords, noeuds, point):
     return ids[k], float(d[k]) * 1000
 
 
-def grande_composante(adj):
-    vus, meilleure = set(), set()
-    for s in list(adj):
-        if s in vus:
-            continue
-        comp, pile = {s}, [s]
-        while pile:
-            u = pile.pop()
-            for v, *_ in adj[u]:
-                if v not in comp:
-                    comp.add(v)
-                    pile.append(v)
-        vus |= comp
-        if len(comp) > len(meilleure):
-            meilleure = comp
-    return meilleure
+def grande_composante(G):
+    pere = {}
+
+    def racine(x):
+        while pere.setdefault(x, x) != x:
+            pere[x] = pere[pere[x]]
+            x = pere[x]
+        return x
+
+    for u, v, *_ in G.E:
+        pere[racine(u)] = racine(v)
+    tailles = defaultdict(int)
+    for x in list(pere):
+        tailles[racine(x)] += 1
+    if not tailles:
+        return set()
+    r = max(tailles, key=tailles.get)
+    return {x for x in list(pere) if racine(x) == r}
 
 
-def traces_epci(coms, adj, coords, alt, hub_code, k=NB_TRACES):
-    """coms : DataFrame [code, nom, pop, score, lon, lat] des communes de l'EPCI. Retourne la liste de traces (dicts)."""
-    comp = grande_composante(adj)
-    noeuds = {i: coords[i] for i in comp}
+def chaine(parent, e):
+    """Aretes du depart jusqu'a l'arete `e`."""
+    out = []
+    while e != -1:
+        out.append(e)
+        e = parent[e]
+    return out[::-1]
+
+
+def profil_chemin(G, alt, ch):
+    """(longueur m, montee cumulee m, pente moyenne max sur 500 m, nb de changements de route) d'une chaine d'aretes."""
+    E = G.E
+    cum = np.cumsum([0.0] + [E[e][2] for e in ch])
+    z = np.array([alt.get(E[ch[0]][0], 0.0)] + [alt.get(E[e][1], 0.0) for e in ch])
+    zr = np.interp(np.arange(0, cum[-1], 100.0), cum, z) if cum[-1] >= 100 else z
+    dz = np.diff(zr)
+    pente = float(np.max(np.abs(zr[5:] - zr[:-5])) / 500.0) if len(zr) > 5 else float(abs(zr[-1] - zr[0]) / max(cum[-1], 1.0))
+    chg = sum(1 for e, f in zip(ch[:-1], ch[1:]) if E[e][4] != E[f][4])
+    return float(cum[-1]), float(dz[dz > 0].sum()), pente, chg
+
+
+def accepte(G, alt, ch, crow_m):
+    """Chemin pole -> commune assez direct, plat et sans zigzag pour qu'on l'emprunte vraiment."""
+    L, montee, pente, chg = profil_chemin(G, alt, ch)
+    km = max(L / 1000, 0.1)
+    return (L <= LONGUEUR_MAX_M and L <= DETOUR_MAX * max(crow_m, 1000.0) and montee / km <= MONTEE_MAX_M_KM
+            and pente <= PENTE_MAX_500M and chg / km <= CHANGEMENTS_MAX_KM)
+
+
+def traces_epci(coms, G, coords, alt, hub_code, k=NB_TRACES):
+    """Reseau de traces reliant au pole (commune la plus peuplee) le maximum de communes de l'EPCI par des chemins
+    directs et peu pentus : arbre des plus courts chemins vers les communes atteignables, decoupe en branches (traces)."""
+    E = G.E
+    comp = grande_composante(G)
     hub = coms[coms.code == hub_code].iloc[0]
-    n_hub, _ = plus_proche(coords, noeuds, (hub.lon, hub.lat))
-    dist, parent = dijkstra(adj, n_hub)
-    atteints = {i: coords[i] for i in dist}
-    # demande par noeud
-    demande, noeud_de = defaultdict(float), {}
+    n_hub, _ = plus_proche(coords, {i: coords[i] for i in comp}, (hub.lon, hub.lat))
+    dist, parent = dijkstra(G, n_hub)
+    meilleure = {}
+    for e, d in enumerate(dist):
+        if d < math.inf and (E[e][1] not in meilleure or d < dist[meilleure[E[e][1]]]):
+            meilleure[E[e][1]] = e
+    if not meilleure:
+        return []
+    atteints = {n: coords[n] for n in meilleure}
+    poids = defaultdict(float)
     for c in coms.itertuples():
         if c.code == hub_code:
             continue
         n, d = plus_proche(coords, atteints, (c.lon, c.lat))
-        if d <= SNAP_MAX_M:
-            noeud_de[c.code] = n
-            demande[n] += float(c.pop) * (50.0 if pd.isna(c.score) else float(c.score)) / 100
-    poids = defaultdict(float, demande)
-    for n in sorted(dist, key=dist.get, reverse=True):
-        if parent[n] is not None:
-            poids[parent[n]] += poids[n]
+        if d > SNAP_MAX_M:
+            continue
+        ch = chaine(parent, meilleure[n])
+        if not accepte(G, alt, ch, 1000 * distance_km((hub.lon, hub.lat), (c.lon, c.lat))):
+            continue
+        w = 1.0 + float(c.pop) * (50.0 if pd.isna(c.score) else float(c.score)) / 100
+        for e in ch:
+            poids[e] += w
     enfants = defaultdict(list)
-    for n, p in parent.items():
-        if p is not None and poids[n] > 0:
-            enfants[p].append(n)
+    for e in poids:
+        enfants[parent[e]].append(e)
     lourd = {p: max(es, key=lambda e: poids[e]) for p, es in enfants.items()}
 
-    def chemin_vers_racine(n):
-        out = [n]
-        while parent[out[-1]] is not None:
-            out.append(parent[out[-1]])
-        return out[::-1]
+    def prolonger(e):
+        while e in lourd:
+            e = lourd[e]
+        return e
 
-    def prolonger(n):  # descend le long des enfants les plus lourds jusqu'a une commune
-        while n in lourd:
-            n = lourd[n]
-        return n
-
-    tetes = [(poids[n_hub], n_hub)] + sorted(((poids[e], e) for p, es in enfants.items() for e in es if lourd.get(p) != e), reverse=True)
+    tetes = sorted((e for p, es in enfants.items() for e in es if p == -1 or lourd[p] != e), key=lambda e: -poids[e])
     traces, utilises = [], set()
     lat0 = float(hub.lat)
-    for _, tete in tetes:
+    for tete in tetes:
         if len(traces) >= k:
             break
-        fin = prolonger(tete)
-        noeuds_chemin = chemin_vers_racine(fin)
-        if len(noeuds_chemin) < 2:
-            continue
-        aretes_chemin = []
-        for u, v in zip(noeuds_chemin[:-1], noeuds_chemin[1:]):
-            _v, _c, L, cat = min((a for a in adj[u] if a[0] == v), key=lambda a: a[1])
-            aretes_chemin.append((u, v, L, cat))
-        longueur = sum(a[2] for a in aretes_chemin)
-        if longueur < LONGUEUR_MIN_M:
-            continue
+        ch = chaine(parent, prolonger(tete))
+        aretes_chemin = [(E[e][0], E[e][1], E[e][2], E[e][3], E[e][4]) for e in ch]
         nouvelles = [a for a in aretes_chemin if frozenset(a[:2]) not in utilises]
-        if not nouvelles:
+        if sum(a[2] for a in nouvelles) < LONGUEUR_MIN_M:
             continue
         utilises |= {frozenset(a[:2]) for a in aretes_chemin}
+        noeuds_chemin = [aretes_chemin[0][0]] + [a[1] for a in aretes_chemin]
         traces.append(decrire(coms, coords, alt, noeuds_chemin, aretes_chemin, nouvelles, lat0, hub))
     return traces
 
@@ -363,24 +455,28 @@ def decrire(coms, coords, alt, noeuds, aretes, nouvelles, lat0, hub):
     pts = {c.code: Point(c.lon * 111320 * math.cos(math.radians(lat0)), c.lat * 110540) for c in coms.itertuples()}
     servies = coms[[ligne.distance(pts[c]) <= RAYON_DESSERTE_M for c in coms.code]]
     km = defaultdict(float)
-    for _u, _v, L, cat in aretes:
-        km[cat] += L / 1000
+    for a in aretes:
+        km[a[3]] += a[2] / 1000
     total = sum(km.values())
-    # denivele sur un profil re-echantillonne tous les 100 m (le MNT ~50 m bruite les aretes courtes)
     cum = np.cumsum([0.0] + [a[2] for a in aretes])
     z = np.array([alt.get(n, 0.0) for n in noeuds])
     zr = np.interp(np.arange(0, cum[-1], 100.0), cum, z) if cum[-1] >= 100 else z
     dz = np.diff(zr)
+    pente500 = float(np.max(np.abs(zr[5:] - zr[:-5])) / 500.0) if len(zr) > 5 else float(abs(zr[-1] - zr[0]) / max(cum[-1], 1.0))
+    chg = sum(1 for x, y in zip(aretes[:-1], aretes[1:]) if x[4] != y[4])
+    fin = coords[noeuds[-1]]
+    crow = max(1000 * distance_km((hub.lon, hub.lat), fin), 1.0)
     props = dict(
         longueur_km=round(total, 1), km_existant=round(km["existant"], 1), km_calme=round(km["calme"], 1), km_a_securiser=round(km["a_securiser"], 1),
         pct_adapte=round(100 * (km["existant"] + km["calme"]) / total) if total else 0,
         communes=int(len(servies)), communes_noms=", ".join(servies.sort_values("pop", ascending=False).nom.head(8)), pop_desservie=int(servies["pop"].sum()),
         score_moyen=round(float(servies.score.mean()), 0) if servies.score.notna().any() else None,
-        denivele_positif_m=int(dz[dz > 0].sum()), pente_moyenne_pct=round(float(np.abs(dz).sum() / max(cum[-1], 1) * 100), 1), pole=hub.nom,
+        denivele_positif_m=int(dz[dz > 0].sum()), pente_moyenne_pct=round(float(np.abs(dz).sum() / max(cum[-1], 1) * 100), 1),
+        pente_max_500m_pct=round(100 * pente500, 1), changements_route=chg, sinuosite=round(float(total * 1000 / crow), 2), pole=hub.nom,
     )
-    # segments a afficher : aretes non deja tracees, regroupees par categorie consecutive
     segs, cur = [], None
-    for u, v, L, cat in nouvelles:
+    for a in nouvelles:
+        u, v, cat = a[0], a[1], a[3]
         if cur and cur[0] == cat and cur[1][-1] == coords[u]:
             cur[1].append(coords[v])
         else:
@@ -389,7 +485,7 @@ def decrire(coms, coords, alt, noeuds, aretes, nouvelles, lat0, hub):
             cur = (cat, [coords[u], coords[v]])
     if cur:
         segs.append(cur)
-    return dict(props=props, segments=[(c, [(round(x, 5), round(y, 5)) for x, y in pts_]) for c, pts_ in segs])
+    return dict(props=props, codes=set(servies.code), segments=[(c, [(round(x, 5), round(y, 5)) for x, y in pts_]) for c, pts_ in segs])
 
 
 # ------------------------------------------------------------------ orchestration
@@ -400,10 +496,10 @@ def exemples_epci(code, coms, tuile_png=relief.telecharger_tuile, reseau=telecha
     else:
         bbox = (coms.lon.min(), coms.lat.min(), coms.lon.max(), coms.lat.max())
         coords, aretes = aretes_osm(reseau(bbox))
-    alt = altitudes(coords, tuile_png)
-    adj = construire_graphe(coords, aretes, alt)
+    alt = lisser_altitudes(altitudes(coords, tuile_png), aretes)
+    G = construire_graphe(coords, aretes, alt)
     hub = coms.sort_values("pop", ascending=False).iloc[0]
-    return hub, traces_epci(coms, adj, coords, alt, hub.code)
+    return hub, traces_epci(coms, G, coords, alt, hub.code)
 
 
 def vers_geojson(resultats):
@@ -428,7 +524,7 @@ def generer():
     pt = carte.to_crs(2154).representative_point().to_crs(4326)
     c = pd.DataFrame(dict(code=carte["code"].astype(str).values, nom=carte["nom"].values, dep=carte["dep"].values,
                           pop=pd.to_numeric(carte["pop"], errors="coerce").fillna(0).values, lon=pt.x.values, lat=pt.y.values))
-    c = c.merge(indic[["code", "grille", "score"]], on="code", how="left").merge(table_epci(), on="code", how="left")
+    c = c.merge(indic[["code", "grille", "score"] + (["i_relief"] if "i_relief" in indic.columns else [])].rename(columns={"i_relief": "relief"}), on="code", how="left").merge(table_epci(), on="code", how="left")
     c["rural"] = c["grille"].ge(5)  # grille de densite INSEE 5 a 7
     forces = [x for x in os.environ.get("EPCI_EXEMPLES", "").split(",") if x]
     choix = forces or choisir_epci(c, 10)
@@ -449,9 +545,11 @@ def generer():
         nom = coms.epci_nom.iat[0]
         try:
             hub, traces = exemples_epci(code, coms, lignes=reseaux.get(code))
-            resume = dict(communes_epci=int(len(coms)), pop_epci=int(coms["pop"].sum()), score_moyen=round(float(coms.score.mean()), 0), traces=len(traces))
+            reliees = set().union(*[t["codes"] for t in traces]) | {hub.code} if traces else set()
+            resume = dict(communes_epci=int(len(coms)), communes_reliees=len(reliees), pop_epci=int(coms["pop"].sum()),
+                          score_moyen=round(float(coms.score.mean()), 0), traces=len(traces))
             resultats.append((code, nom, hub, traces, resume))
-            log(f"  {nom} ({code}) : {len(traces)} traces, pole {hub.nom}")
+            log(f"  {nom} ({code}) : {len(traces)} traces, {resume['communes_reliees']}/{len(coms)} communes reliees, pole {hub.nom}")
         except Exception as e:  # noqa: BLE001
             log(f"  [!] {nom} ({code}) ignore : {e}")
     if not resultats:

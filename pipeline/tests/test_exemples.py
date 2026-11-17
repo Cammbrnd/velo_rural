@@ -50,7 +50,7 @@ def test_traces_hub_et_communes_desservies():
     alt = {n: 0.0 for n in coords}
     adj = exemples.construire_graphe(coords, aretes, alt)
     t = exemples.traces_epci(communes_test(), adj, coords, alt, "A")
-    assert 1 <= len(t) <= 3
+    assert len(t) >= 1
     p0 = t[0]["props"]
     assert p0["pole"] == "Commune A" and p0["communes"] >= 2 and p0["longueur_km"] > 5
     assert p0["pct_adapte"] == 100 and p0["km_a_securiser"] == 0
@@ -98,7 +98,7 @@ def test_geojson_et_altitudes_sans_tuile():
     alt = exemples.altitudes(coords, tuile_png=lambda x, y, z: None)
     assert set(alt) == set(coords) and all(v == 0 for v in alt.values())
     hub, traces = exemples.exemples_epci("E", communes_test(), tuile_png=lambda x, y, z: None, reseau=lambda bbox: els)
-    gj = exemples.vers_geojson([("E", "EPCI test", hub, traces, dict(communes_epci=5, pop_epci=4900, score_moyen=60, traces=len(traces)))])
+    gj = exemples.vers_geojson([("E", "EPCI test", hub, traces, dict(communes_epci=5, communes_reliees=5, pop_epci=4900, score_moyen=60, traces=len(traces)))])
     types = {f["properties"]["type"] for f in gj["features"]}
     assert types == {"pole", "trace"} and hub.nom == "Commune A"
 
@@ -112,7 +112,7 @@ def test_lignes_vers_aretes_et_regions():
     coords, aretes = exemples.lignes_vers_aretes(lignes)
     adj = exemples.construire_graphe(coords, aretes, {n: 0.0 for n in coords})
     t = exemples.traces_epci(communes_test(), adj, coords, {n: 0.0 for n in coords}, "A")
-    assert 1 <= len(t) <= 3 and t[0]["props"]["communes"] >= 2
+    assert len(t) >= 1 and t[0]["props"]["communes"] >= 2
     hub, tr = exemples.exemples_epci("E", communes_test(), tuile_png=lambda x, y, z: None, lignes=lignes)
     assert hub.nom == "Commune A" and tr
     assert len(exemples.DEP_REGION) == 96
@@ -132,3 +132,44 @@ def test_type_piste():
     assert type_piste("residential", {"cycleway:right": "lane"}) == "bande"
     assert type_piste("secondary", {"cycleway": "track"}) == "piste"
     assert type_piste("residential", {"cycleway": "shared_lane"}) is None
+
+
+def test_commune_en_montagne_non_reliee_et_pentes_evitees():
+    coords, aretes = exemples.aretes_osm(reseau_grille())
+    # B (6,0) au sommet d'un versant raide : +400 m sur 3 mailles = ~11 % : rien de raisonnable pour l'atteindre
+    alt = {n: (min(400.0, 130.0 * max(0, (n - 1000) // 100 - 3)) if (n - 1000) // 100 >= 4 else 0.0) for n in coords}
+    G = exemples.construire_graphe(coords, aretes, alt)
+    t = exemples.traces_epci(communes_test(), G, coords, alt, "A")
+    noms = " ".join(x["props"]["communes_noms"] for x in t)
+    assert "Commune B" not in noms and "Commune C" not in noms
+    assert "Commune E" in noms
+    assert all(x["props"]["pente_max_500m_pct"] <= 7.0 for x in t)
+
+
+def test_changements_de_route_et_virages_penalises():
+    # deux routes de A vers B : un escalier (virages et changements de voie a chaque maille) et une voie droite un peu plus longue
+    coords, aretes = exemples.aretes_osm(reseau_grille(7))
+    alt = {n: 0.0 for n in coords}
+    # on rend la ligne j=0 une seule route nommee : continuite, pas de changement de route
+    aretes2 = [(u, v, L, cat, "D7" if (u - 1000) % 100 == 0 and (v - 1000) % 100 == 0 else r) for u, v, L, cat, r in aretes]
+    G = exemples.construire_graphe(coords, aretes2, alt)
+    t = exemples.traces_epci(communes_test()[lambda d: d.code.isin(["A", "B"])], G, coords, alt, "A")
+    assert t and t[0]["props"]["changements_route"] <= 1 and t[0]["props"]["sinuosite"] <= 1.1
+    assert exemples.Graphe(coords, aretes2, alt).penalite(0, 0) >= 0
+
+
+def test_relier_un_maximum_de_communes_au_pole():
+    coords, aretes = exemples.aretes_osm(reseau_grille())
+    alt = {n: 0.0 for n in coords}
+    G = exemples.construire_graphe(coords, aretes, alt)
+    t = exemples.traces_epci(communes_test(), G, coords, alt, "A")
+    codes = set().union(*[x["codes"] for x in t])
+    assert {"B", "C", "D", "E"} <= codes
+    assert len(t) <= exemples.NB_TRACES
+
+
+def test_lissage_altitudes():
+    aretes = [(i, i + 1, 20.0, "calme", "r") for i in range(10)]
+    alt = {i: (100.0 if i == 5 else 0.0) for i in range(11)}  # un pic de bruit sur un noeud
+    l = exemples.lisser_altitudes(alt, aretes)
+    assert max(l.values()) < 60 and abs(sum(l.values()) - 100) < 1e-6 + 40

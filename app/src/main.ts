@@ -204,10 +204,10 @@ function monterExemples(carte: maplibregl.Map, fc: GeoJSON.FeatureCollection, in
     if (!p) return;
     surExemple = true;
     if (p.type === "pole") {
-      ligne(infobulle, `${p.epci_nom} — pôle : ${p.pole}`, `${p.communes_epci} communes, ${Number(p.pop_epci).toLocaleString("fr-FR")} hab., ${p.traces} tracés proposés`);
+      ligne(infobulle, `${p.epci_nom} — pôle : ${p.pole}`, `${p.communes_reliees ?? "?"} communes reliées sur ${p.communes_epci}, ${Number(p.pop_epci).toLocaleString("fr-FR")} hab., ${p.traces} tracés proposés`);
     } else {
       ligne(infobulle, `${p.epci_nom} — tracé ${p.trace} depuis ${p.pole}`,
-        `${p.longueur_km} km (${p.km_existant} existants, ${p.km_calme} routes calmes, ${p.km_a_securiser} à sécuriser) · ${p.communes} communes, ${Number(p.pop_desservie).toLocaleString("fr-FR")} hab. · dénivelé + ${p.denivele_positif_m} m`);
+        `${p.longueur_km} km (${p.km_existant} existants, ${p.km_calme} routes calmes, ${p.km_a_securiser} à sécuriser) · ${p.communes} communes, ${Number(p.pop_desservie).toLocaleString("fr-FR")} hab. · dénivelé + ${p.denivele_positif_m} m, pente max ${p.pente_max_500m_pct} % sur 500 m · ${p.changements_route} changements de route`);
     }
     infobulle.style.left = e.point.x + "px";
     infobulle.style.top = e.point.y + "px";
