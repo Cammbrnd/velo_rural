@@ -42,7 +42,7 @@ ZOOM_MNT = 11
 
 
 # ------------------------------------------------------------------ choix des EPCI
-def get_json(url, params, essais=5):
+def get_json(url, params, essais=5, pause=4):
     for i in range(1, essais + 1):
         try:
             r = requests.get(url, params=params, timeout=120)
@@ -51,7 +51,7 @@ def get_json(url, params, essais=5):
         except requests.RequestException:
             if i == essais:
                 raise
-            time.sleep(4 * i)
+            time.sleep(pause * i)
 
 
 def table_epci():
@@ -107,7 +107,7 @@ def telecharger_reseau(bbox, marge=0.03):
     w, s, e, n = bbox[0] - marge, bbox[1] - marge, bbox[2] + marge, bbox[3] + marge
     q = f'[out:json][timeout:240];way["highway"~"^({HIGHWAYS})$"]["access"!~"^(no|private)$"]["bicycle"!="no"]({s},{w},{n},{e});out geom;'
     derniere = None
-    for essai in range(6):
+    for essai in range(3):
         url = OVERPASS[essai % len(OVERPASS)]
         try:
             r = requests.post(url, data={"data": q}, timeout=300)
@@ -149,7 +149,7 @@ def aretes_osm(elements):
 
 def regions_france():
     """Regions Geofabrik de France metropolitaine : {id: (url pbf, polygone)} depuis l'index (avec geometries)."""
-    idx = requests.get("https://download.geofabrik.de/index-v1.json", timeout=180).json()
+    idx = get_json("https://download.geofabrik.de/index-v1.json", None, essais=8, pause=15)
     out = {}
     for f in idx["features"]:
         p = f["properties"]
