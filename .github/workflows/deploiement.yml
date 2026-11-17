@@ -49,9 +49,11 @@ jobs:
       - name: Cache du resultat des routes calmes (calcul lourd, recalcule chaque mois par le declenchement planifie)
         uses: actions/cache@v4
         with:
-          path: pipeline/donnees_brutes/routes_calmes.csv
-          key: routes-calmes-v1-${{ steps.mois.outputs.mois }}
-          restore-keys: routes-calmes-v1-
+          path: |
+            pipeline/donnees_brutes/routes_calmes.csv
+            pipeline/donnees_brutes/pistes.geojson
+          key: routes-calmes-v2-${{ steps.mois.outputs.mois }}
+          restore-keys: routes-calmes-v2-
       - name: Outil osmium pour les extraits OSM (routes calmes, exemples d'amenagement)
         run: sudo apt-get install -y -q osmium-tool
       - name: Pipeline (telechargement, assemblage, export)
@@ -98,8 +100,18 @@ jobs:
           taille=$(stat -c %s data/communes.pmtiles); echo "communes.pmtiles : $((taille/1000000)) Mo"
           [ "$taille" -lt 95000000 ] || { echo "::error::PMTiles > 95 Mo : limite GitHub Pages (100 Mo par fichier)"; exit 1; }
           # ?v=<run> : evite qu'un navigateur melange d'anciens octets (cache des requetes Range) avec le nouveau fichier
+          # contours EPCI et pistes cyclables existantes : couches facultatives
+          ep=""; if [ -f data/epci.geojson ]; then
+            ~/bin/tippecanoe -q -f -o data/epci.pmtiles -l epci -Z4 -z11 --detect-shared-borders --no-tile-size-limit data/epci.geojson
+            rm -f data/epci.geojson; ep=",\"epci\":\"data/epci.pmtiles?v=$GITHUB_RUN_ID\""
+          fi
+          pi=""; if [ -f ../../pipeline/donnees_brutes/pistes.geojson ]; then
+            ~/bin/tippecanoe -q -f -o data/pistes.pmtiles -l pistes -Z7 -z12 --drop-densest-as-needed --no-tile-size-limit ../../pipeline/donnees_brutes/pistes.geojson
+            t=$(stat -c %s data/pistes.pmtiles); echo "pistes.pmtiles : $((t/1000000)) Mo"
+            if [ "$t" -lt 60000000 ]; then pi=",\"pistes\":\"data/pistes.pmtiles?v=$GITHUB_RUN_ID\""; else echo "::warning::pistes.pmtiles trop gros, couche ignoree"; rm -f data/pistes.pmtiles; fi
+          fi
           ex=""; [ -f data/exemples.geojson ] && ex=",\"exemples\":\"data/exemples.geojson?v=$GITHUB_RUN_ID\""
-          echo "{\"demo\":false,\"source\":{\"type\":\"pmtiles\",\"url\":\"data/communes.pmtiles?v=$GITHUB_RUN_ID\",\"couche\":\"communes\"},\"table\":\"data/indicateurs.json?v=$GITHUB_RUN_ID\"$ex}" > config.json
+          echo "{\"demo\":false,\"source\":{\"type\":\"pmtiles\",\"url\":\"data/communes.pmtiles?v=$GITHUB_RUN_ID\",\"couche\":\"communes\"},\"table\":\"data/indicateurs.json?v=$GITHUB_RUN_ID\"$ex$ep$pi}" > config.json
 
       # ---------- Application ----------
       - uses: actions/setup-node@v4

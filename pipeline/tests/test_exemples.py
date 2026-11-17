@@ -121,3 +121,14 @@ def test_lignes_vers_aretes_et_regions():
     ot = '"bicycle"=>"no"'
     g2 = lignes.copy(); g2["other_tags"] = ot
     assert exemples.lignes_vers_aretes(g2)[1] == []
+
+
+def test_type_piste():
+    from routes_calmes import type_piste
+    assert type_piste("cycleway", {}) == "piste"
+    assert type_piste("cycleway", {"access": "private"}) is None
+    assert type_piste("path", {"bicycle": "designated"}) == "piste"
+    assert type_piste("path", {}) is None
+    assert type_piste("residential", {"cycleway:right": "lane"}) == "bande"
+    assert type_piste("secondary", {"cycleway": "track"}) == "piste"
+    assert type_piste("residential", {"cycleway": "shared_lane"}) is None

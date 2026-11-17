@@ -123,3 +123,13 @@ def test_peu_motorises_filtre_modalite(tmp_path):
     f.write_text("annee,geocode_commune,nb_voitures,valeur\n2023,03001,Aucune voiture,12.5\n2023,03001,1 voiture,50\n2017,03001,Aucune voiture,99\n2023,03002,Aucune voiture,4\n", encoding="utf-8")
     t = assembler.lire_indicateur(f, dict(valeur=r"^valeur$", filtre=(r"^nb_voitures$", r"aucune"))).set_index("code")["v"]
     assert t["03001"] == 12.5 and t["03002"] == 4
+
+
+def test_exporter_epci(tmp_path, monkeypatch):
+    import exemples
+    communes = gpd.GeoDataFrame({"code": ["1", "2", "3"], "nom": list("abc"), "dep": ["01"] * 3,
+                                 "geometry": [box(0, 0, 1, 1), box(1, 0, 2, 1), box(2, 0, 3, 1)]}, crs=4326)
+    monkeypatch.setattr(exemples, "table_epci", lambda: pd.DataFrame({"code": ["1", "2", "3"], "epci": ["E1", "E1", "E2"], "epci_nom": ["Un", "Un", "Deux"]}))
+    exporter.exporter_epci(communes, tmp_path, tol=0.0001)
+    e = gpd.read_file(tmp_path / "epci.geojson")
+    assert sorted(e["code"]) == ["E1", "E2"] and e.loc[e.code == "E1", "geometry"].iat[0].area == pytest.approx(2.0)

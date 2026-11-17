@@ -71,6 +71,40 @@ def prefiltrer(pbf, dossier_tmp):
     return sortie
 
 
+ROUTES_CYCLABLES = {"residential", "living_street", "unclassified", "tertiary", "secondary", "primary", "trunk", "service", "track"}
+CHEMINS = {"path", "footway", "pedestrian", "track", "bridleway", "steps"}
+
+
+def type_piste(highway, t):
+    """'piste' (voie separee : cycleway, voie verte, cycleway=track), 'bande' (cycleway=lane) ou None."""
+    if t.get("bicycle") == "no" or t.get("access") in ("no", "private"):
+        return None
+    if highway == "cycleway":
+        return "piste"
+    if highway in CHEMINS and t.get("bicycle") == "designated":
+        return "piste"
+    vals = {t.get(k) for k in ("cycleway", "cycleway:left", "cycleway:right", "cycleway:both")}
+    if highway in ROUTES_CYCLABLES:
+        if vals & {"track", "opposite_track"}:
+            return "piste"
+        if vals & {"lane", "opposite_lane"}:
+            return "bande"
+    return None
+
+
+def pistes_region(pbf, dossier_tmp):
+    """GeoDataFrame [type, geometry] des amenagements cyclables existants d'une region (osmium tags-filter, puis GDAL)."""
+    sortie = Path(dossier_tmp) / (Path(pbf).name + ".pistes.osm.pbf")
+    filtres = ["w/highway=cycleway", "w/cycleway", "w/cycleway:left", "w/cycleway:right", "w/cycleway:both", "w/bicycle=designated"]
+    subprocess.run(["osmium", "tags-filter", str(pbf), *filtres, "-o", str(sortie), "--overwrite"], check=True)
+    g = gpd.read_file(sortie, engine="pyogrio", sql="SELECT highway, other_tags FROM lines")
+    sortie.unlink(missing_ok=True)
+    g["type"] = [type_piste(str(h), etiquettes(o)) for h, o in zip(g["highway"], g["other_tags"])]
+    g = g[g["type"].notna()][["type", "geometry"]]
+    g["geometry"] = g.geometry.simplify(0.00005)
+    return g
+
+
 def routes_calmes_region(pbf, communes_region):
     lignes = lire_lignes(pbf)
     lignes = lignes[est_calme(lignes["highway"], lignes["other_tags"])]
@@ -94,16 +128,29 @@ def urls_regions():
     return {r: f"{cfg.GEOFABRIK}/{r}-latest.osm.pbf" for r in cfg.REGIONS_GEOFABRIK}
 
 
-def calculer(communes):
+def calculer(communes, fichier_pistes=None):
+    """km de routes calmes par commune ; ecrit aussi, si fichier_pistes est donne, les pistes cyclables existantes (GeoJSON national)."""
     km = pd.Series(0.0, index=communes["code"].values)
+    pistes = []
     with tempfile.TemporaryDirectory() as tmp:  # hors du cache : les extraits ne sont pas conserves
         for region, url in urls_regions().items():
             log(f"  routes calmes : {region}")
             pbf = telecharger(url, Path(tmp) / f"{region}.osm.pbf")
+            if fichier_pistes and shutil.which("osmium"):
+                try:
+                    pistes.append(pistes_region(pbf, tmp))
+                except Exception as e:  # noqa: BLE001
+                    log(f"  [!] pistes {region} ignorees : {type(e).__name__} {e}")
             part = routes_calmes_region(prefiltrer(pbf, tmp), communes)
             km = km.add(part, fill_value=0.0)
             for f in Path(tmp).iterdir():
                 f.unlink()
+    if fichier_pistes and pistes:
+        g = pd.concat(pistes, ignore_index=True)
+        g = gpd.GeoDataFrame(g, geometry="geometry", crs=4326)
+        Path(fichier_pistes).unlink(missing_ok=True)
+        g.to_file(fichier_pistes, driver="GeoJSON", COORDINATE_PRECISION=5)
+        log(f"  pistes cyclables : {len(g)} troncons ({g['type'].value_counts().to_dict()}), {Path(fichier_pistes).stat().st_size / 1e6:.0f} Mo")
     return km
 
 
@@ -113,7 +160,7 @@ def indicateur_routes_calmes(communes, dossier, recalculer=False):
         km = pd.read_csv(cache, dtype={"code": str}).set_index("code")["km"]
         log(f"  routes calmes : cache {cache.name}")
     else:
-        km = calculer(communes)
+        km = calculer(communes, Path(dossier) / "pistes.geojson")
         km.rename("km").rename_axis("code").to_csv(cache)
     km = km.reindex(communes["code"].values).fillna(0.0)
     dens = km / superficie_km2(communes).clip(lower=0.1)

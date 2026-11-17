@@ -88,7 +88,21 @@ async function demarrer() {
       id: "communes-sel", type: "line", source: "communes", ...couche, filter: ["==", ["get", "code"], ""],
       paint: { "line-color": "#0b0b0b", "line-width": 2.5 },
     } as never);
+    if (cfg.epci) {
+      carte.addSource("epci", { type: "vector", url: "pmtiles://" + new URL(cfg.epci, window.location.href).href });
+      carte.addLayer({ id: "epci-trait", type: "line", source: "epci", "source-layer": "epci",
+        paint: { "line-color": "#0b0b0b", "line-opacity": 0.75, "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.4, 8, 1.2, 11, 2.2] } } as never);
+    }
+    if (cfg.pistes) {
+      carte.addSource("pistes", { type: "vector", url: "pmtiles://" + new URL(cfg.pistes, window.location.href).href });
+      carte.addLayer({ id: "pistes-fond", type: "line", source: "pistes", "source-layer": "pistes", minzoom: 7,
+        layout: { "line-cap": "round" }, paint: { "line-color": "#ffffff", "line-opacity": 0.8, "line-width": ["interpolate", ["linear"], ["zoom"], 7, 2, 12, 5] } } as never);
+      carte.addLayer({ id: "pistes-trait", type: "line", source: "pistes", "source-layer": "pistes", minzoom: 7,
+        layout: { "line-cap": "round" },
+        paint: { "line-color": ["match", ["get", "type"], "piste", "#7b2d8e", "#c9a3d6"], "line-width": ["interpolate", ["linear"], ["zoom"], 7, 0.8, 12, 2.6] } } as never);
+    }
     recolorer();
+    montrerCouches(carte);
     if (exemples && exemples.features.length) monterExemples(carte, exemples, infobulle);
   });
 
@@ -117,6 +131,19 @@ async function demarrer() {
     ui.selectionner(code);
     carte.setFilter("communes-sel", ["==", ["get", "code"], code] as never);
   });
+}
+
+// cases a cocher : afficher / masquer les communes, les contours d'EPCI, les pistes existantes
+function montrerCouches(carte: maplibregl.Map) {
+  const lier = (idCase: string, couches: string[]) => {
+    const c = document.getElementById(idCase) as HTMLInputElement | null;
+    const maj = () => couches.forEach((id) => carte.getLayer(id) && carte.setLayoutProperty(id, "visibility", c?.checked ? "visible" : "none"));
+    c?.addEventListener("change", maj);
+    maj();
+  };
+  lier("communes-voir", ["communes-fill", "communes-trait", "communes-sel"]);
+  lier("epci-voir", ["epci-trait"]);
+  lier("pistes-voir", ["pistes-fond", "pistes-trait"]);
 }
 
 let surExemple = false; // vrai quand la souris est sur un trace d'exemple (son infobulle prime sur celle de la commune)

@@ -55,6 +55,10 @@ export function monterPanneau(root: HTMLElement, cfg: Config, table: Ligne[], et
     <select id="mode">${MODES.map((m) => `<option value="${m.id}">${esc(m.label)}</option>`).join("")}</select>
     <label class="case"><input type="checkbox" id="rural" ${etat.rural ? "checked" : ""} ${grilleDispo ? "" : "disabled"} /> Communes rurales uniquement (grille de densité INSEE 5 à 7)${grilleDispo ? "" : " — indisponible : grille absente des données"}</label>
     <div class="legende" id="legende" aria-label="Légende"></div>
+    <label class="case"><input type="checkbox" id="communes-voir" checked /> Afficher les communes (carte colorée)</label>
+    ${cfg.epci ? `<label class="case"><input type="checkbox" id="epci-voir" checked /> Afficher le contour des EPCI</label>` : ""}
+    ${cfg.pistes ? `<label class="case"><input type="checkbox" id="pistes-voir" checked /> Afficher les pistes cyclables existantes (OSM, à partir du zoom 7)</label>
+    <ul class="legende-ex"><li><i style="background:#7b2d8e"></i> Piste, voie verte, bande séparée</li><li><i style="background:#c9a3d6"></i> Bande cyclable sur chaussée</li></ul>` : ""}
 
     <div id="exemples-bloc" hidden>
       <h2>Exemples d'aménagement</h2>

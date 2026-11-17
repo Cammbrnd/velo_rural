@@ -83,9 +83,26 @@ def exporter(communes, indic, sortie, fichier_config, tol=cfg.SIMPLIFICATION_DEG
     return f_geo
 
 
+def exporter_epci(communes, sortie, tol=cfg.SIMPLIFICATION_DEG):
+    """Contours des EPCI (communes simplifiees puis fusionnees : les limites coincident avec celles des communes)."""
+    from exemples import table_epci
+    t = table_epci()
+    g = simplifier(communes[["code", "geometry"]].assign(code=communes["code"].astype(str)), tol).merge(t, on="code", how="inner")
+    e = g.dissolve(by="epci", aggfunc=dict(epci_nom="first")).reset_index().rename(columns={"epci": "code", "epci_nom": "nom"})
+    f = sortie / "epci.geojson"
+    f.unlink(missing_ok=True)
+    e[["code", "nom", "geometry"]].to_file(f, driver="GeoJSON", COORDINATE_PRECISION=5)
+    log(f"ecrit {f} ({f.stat().st_size / 1e6:.1f} Mo, {len(e)} EPCI)")
+
+
 def main():
     indic = pd.read_parquet(cfg.DOSSIER_BRUT / "indicateurs_communes.parquet")
-    exporter(charger_communes(), indic, cfg.DOSSIER_SORTIE, cfg.FICHIER_CONFIG_APP)
+    communes = charger_communes()
+    exporter(communes, indic, cfg.DOSSIER_SORTIE, cfg.FICHIER_CONFIG_APP)
+    try:  # couche facultative : un echec (geo.api) ne bloque pas le deploiement
+        exporter_epci(communes, cfg.DOSSIER_SORTIE)
+    except Exception as e:  # noqa: BLE001
+        log(f"[!] contours EPCI ignores : {type(e).__name__} {e}")
 
 
 if __name__ == "__main__":

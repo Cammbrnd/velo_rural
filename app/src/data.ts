@@ -5,6 +5,8 @@ export interface Config {
   source: { type: "geojson" | "pmtiles"; url: string; couche?: string };
   table?: string; // JSON [ {code, nom, grille, i_*...}, ... ] (obligatoire avec pmtiles)
   exemples?: string; // GeoJSON des traces d'exemple (pole + traces par EPCI)
+  epci?: string; // PMTiles des contours d'EPCI (couche "epci")
+  pistes?: string; // PMTiles des amenagements cyclables existants OSM (couche "pistes", proprietes type = piste | bande)
   fond?: string; // gabarit de tuiles raster {z}/{x}/{y} (par defaut : Plan IGN)
 }
 
