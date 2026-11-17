@@ -73,7 +73,7 @@ async function demarrer() {
     },
   });
 
-  carte.on("load", () => {
+  carte.once("style.load", () => { // pas "load" : il attend aussi les tuiles du fond IGN (lent ou bloque, les couches n'apparaitraient pas)
     if (cfg.source.type === "geojson") {
       carte.addSource("communes", { type: "geojson", data: geojson as GeoJSON.FeatureCollection });
     } else {
