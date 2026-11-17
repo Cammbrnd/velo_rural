@@ -14,6 +14,13 @@ with sync_playwright() as p:
     pg.on("pageerror", lambda e: print(f"SMOKE pageerror {str(e)[:300]}"))
     pg.on("response", lambda r: print(f"SMOKE http {r.status} {r.url.split('/')[-1][:60]} range={r.headers.get('content-range', '-')} enc={r.headers.get('content-encoding', '-')}")
           if ".pmtiles" in r.url or "indicateurs.json" in r.url else None)
+    bins = {"n": 0, "octets": 0, "echecs": []}
+    def _rep(r):
+        if "/data/" in r.url and (".bin" in r.url or "meta.json" in r.url):
+            bins["n"] += 1
+            if r.status >= 400: bins["echecs"].append(f"{r.status} {r.url.split('/data/')[-1][:40]}")
+    pg.on("response", _rep)
+    pg.on("requestfailed", lambda r: print(f"SMOKE requestfailed {r.url.split('/')[-1][:50]} {r.failure}") if "geopf" not in r.url else None)
     pg.goto(url, wait_until="load")
     n = 0
     for _ in range(40):  # jusqu'a 60 s
@@ -21,6 +28,8 @@ with sync_playwright() as p:
         n = pg.evaluate("() => { const m = window.__carte; return m && m.getLayer('communes-fill') ? m.queryRenderedFeatures({layers: ['communes-fill']}).length : -1; }")
         if n > 0:
             break
+    etat0 = pg.evaluate("() => { const m = window.__carte; return m ? {carte: true, charge: m.loaded(), style: m.isStyleLoaded(), couches: m.getStyle().layers.map(l => l.id).join(','), sources: Object.keys(m.getStyle().sources).join(',')} : {carte: false}; }")
+    print("SMOKE etat", json.dumps({**etat0, "morceaux": bins}, ensure_ascii=False))
     etat = pg.evaluate("() => ({alerte: document.querySelector('.alerte')?.textContent || '', zoom: window.__carte?.getZoom(), panneau: document.getElementById('panneau').innerText.slice(0, 80)})")
     ex = pg.evaluate("() => { const m = window.__carte; return m && m.getSource('exemples') ? m.querySourceFeatures('exemples').length : null; }")
     print("SMOKE", json.dumps({"communes_rendues": n, "exemples": ex, **etat}, ensure_ascii=False))
