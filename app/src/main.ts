@@ -3,6 +3,7 @@ import type { StyleSpecification } from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./style.css";
+import { monterPmtiles } from "./morceaux";
 import { chargerConfig, chargerDonnees, chargerExemples } from "./data";
 import { GRILLE_RURAL_MIN } from "./indicators";
 import { monterPanneau, type Etat } from "./panel";
@@ -14,14 +15,6 @@ const FOND_IGN =
 
 maplibregl.setWorkerUrl(new URL(import.meta.env.BASE_URL + "maplibre/maplibre-gl-worker.mjs", window.location.href).href);
 
-// URL absolue d'un PMTiles + marque propre a ce chargement : un navigateur de bureau qui garde en cache d'anciens octets
-// (requetes Range d'un fichier remplace depuis) ne peut plus les melanger avec le nouveau fichier ("Decoding failed")
-const urlPmtiles = (u: string) => {
-  const url = new URL(u, window.location.href);
-  url.searchParams.set("s", String(Date.now()));
-  return "pmtiles://" + url.href;
-};
-
 async function demarrer() {
   const panneau = document.getElementById("panneau")!;
   const cfg = await chargerConfig();
@@ -32,6 +25,9 @@ async function demarrer() {
 
   const protocole = new Protocol();
   maplibregl.addProtocol("pmtiles", protocole.tile);
+  const urlCommunes = cfg.source.type === "pmtiles" ? await monterPmtiles(protocole, cfg.source.url) : "";
+  const urlEpci = cfg.epci ? await monterPmtiles(protocole, cfg.epci).catch(() => "") : "";
+  const urlPistes = cfg.pistes ? await monterPmtiles(protocole, cfg.pistes).catch(() => "") : "";
 
   const style: StyleSpecification = {
     version: 8,
@@ -82,7 +78,7 @@ async function demarrer() {
       carte.addSource("communes", { type: "geojson", data: geojson as GeoJSON.FeatureCollection });
     } else {
       // URL absolue : indispensable sous un sous-chemin (ex. GitHub Pages /depot/)
-      carte.addSource("communes", { type: "vector", url: urlPmtiles(cfg.source.url) });
+      carte.addSource("communes", { type: "vector", url: urlCommunes });
     }
     carte.addLayer({
       id: "communes-fill", type: "fill", source: "communes", ...couche,
@@ -96,13 +92,13 @@ async function demarrer() {
       id: "communes-sel", type: "line", source: "communes", ...couche, filter: ["==", ["get", "code"], ""],
       paint: { "line-color": "#0b0b0b", "line-width": 2.5 },
     } as never);
-    if (cfg.epci) {
-      carte.addSource("epci", { type: "vector", url: urlPmtiles(cfg.epci) });
+    if (urlEpci) {
+      carte.addSource("epci", { type: "vector", url: urlEpci });
       carte.addLayer({ id: "epci-trait", type: "line", source: "epci", "source-layer": "epci",
         paint: { "line-color": "#0b0b0b", "line-opacity": 0.75, "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.4, 8, 1.2, 11, 2.2] } } as never);
     }
-    if (cfg.pistes) {
-      carte.addSource("pistes", { type: "vector", url: urlPmtiles(cfg.pistes) });
+    if (urlPistes) {
+      carte.addSource("pistes", { type: "vector", url: urlPistes });
       carte.addLayer({ id: "pistes-fond", type: "line", source: "pistes", "source-layer": "pistes", minzoom: 7,
         layout: { "line-cap": "round" }, paint: { "line-color": "#ffffff", "line-opacity": 0.8, "line-width": ["interpolate", ["linear"], ["zoom"], 7, 2, 12, 5] } } as never);
       carte.addLayer({ id: "pistes-trait", type: "line", source: "pistes", "source-layer": "pistes", minzoom: 7,
