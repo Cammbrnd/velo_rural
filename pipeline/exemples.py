@@ -32,12 +32,15 @@ from routes_calmes import est_calme_voie, etiquettes, type_piste
 
 OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]
 HIGHWAYS = "residential|living_street|unclassified|tertiary|secondary|track|cycleway|path"
-FACTEUR = {"existant": 0.6, "calme": 1.0, "a_securiser": 1.8}
+FACTEUR = {"existant": 0.5, "calme": 1.0, "a_securiser": 1.8}
 COUT_MONTEE = 6.0            # m de cout par m de montee (|dz| entre deux noeuds, altitudes lissees)
 PENTE_REF = 0.04             # pente (4 %) a partir de laquelle le cout d'une arete double ; il croit ensuite au carre
 PENTE_MAX_ARETE = 0.15       # arete plus raide (sur >= 40 m) : exclue du graphe
 L_MIN_PENTE = 40.0           # longueur minimale pour calculer une pente (le MNT est a ~50 m)
 PENALITE_CHANGEMENT = 250.0  # m de cout a chaque changement de route (nom / ref / voie OSM differents) : evite les zigzags
+PENALITE_CHANGEMENT_PISTE = 60.0  # idem quand l'une des deux voies est un amenagement cyclable existant (raccords normaux)
+FACTEUR_PARTAGE = 0.7        # cout des aretes deja utilisees par un autre chemin : les branches partagent un tronc au lieu de longer en parallele
+PASSES_PARTAGE = 3
 PENALITE_VIRAGE = ((150, math.inf), (120, 150.0), (60, 80.0), (30, 25.0))  # (angle mini en degres, penalite en m)
 RAYON_DESSERTE_M = 600       # une commune est desservie si son bourg est a moins de 600 m de la trace
 SNAP_MAX_M = 2000
@@ -308,12 +311,19 @@ class Graphe:
             for a, b, sx, sy in ((u, v, dx / n, dy / n), (v, u, -dx / n, -dy / n)):
                 self.sortant[a].append(len(self.E))
                 self.E.append((a, b, L, cat, route, cout, sx, sy))
+        self.cout = [e[5] for e in self.E]
+
+    def partager(self, paires):
+        """Rend moins chères les aretes (non orientees) deja utilisees : les chemins suivants tendent a les reprendre."""
+        self.cout = [e[5] * (FACTEUR_PARTAGE if frozenset((e[0], e[1])) in paires else 1.0) for e in self.E]
 
     def penalite(self, e, f):
         a, b = self.E[e], self.E[f]
         angle = math.degrees(math.acos(max(-1.0, min(1.0, a[6] * b[6] + a[7] * b[7]))))  # 0 = tout droit
         pen = next((p for seuil, p in PENALITE_VIRAGE if angle >= seuil), 0.0)
-        return pen + (PENALITE_CHANGEMENT if a[4] != b[4] else 0.0)
+        if a[4] == b[4]:
+            return pen
+        return pen + (PENALITE_CHANGEMENT_PISTE if "existant" in (a[3], b[3]) else PENALITE_CHANGEMENT)
 
 
 def construire_graphe(coords, aretes, alt):
@@ -326,7 +336,7 @@ def dijkstra(G, source, horizon=4 * LONGUEUR_MAX_M):
     dist, parent = [math.inf] * len(E), [-1] * len(E)
     file = []
     for e in G.sortant.get(source, ()):
-        dist[e] = E[e][5]
+        dist[e] = G.cout[e]
         heapq.heappush(file, (dist[e], e))
     while file:
         d, e = heapq.heappop(file)
@@ -336,7 +346,7 @@ def dijkstra(G, source, horizon=4 * LONGUEUR_MAX_M):
             pen = G.penalite(e, f)
             if pen == math.inf:
                 continue
-            nd = d + E[f][5] + pen
+            nd = d + G.cout[f] + pen
             if nd < dist[f] and nd < horizon:
                 dist[f], parent[f] = nd, e
                 heapq.heappush(file, (nd, f))
@@ -428,38 +438,51 @@ def traces_epci(coms, G, coords, alt, hub_code, k=NB_TRACES):
     comp = grande_composante(G)
     hub = coms[coms.code == hub_code].iloc[0]
     n_hub, _ = plus_proche(coords, {i: coords[i] for i in comp}, (hub.lon, hub.lat))
-    dist, parent = dijkstra(G, n_hub)
-    meilleure = {}
-    for e, d in enumerate(dist):
-        if d < math.inf and (E[e][1] not in meilleure or d < dist[meilleure[E[e][1]]]):
-            meilleure[E[e][1]] = e
-    if not meilleure:
-        return []
-    atteints = {n: coords[n] for n in meilleure}
-    poids = defaultdict(float)
     comp_piste, km_piste = pistes_existantes(G)
-    for cid, km in km_piste.items():  # pistes deja amenagees a rejoindre : on vise leur noeud le plus proche du pole
-        noeuds_c = [n for n in meilleure if comp_piste.get(n) == cid]
-        if not noeuds_c:
-            continue
-        n = min(noeuds_c, key=lambda x: dist[meilleure[x]])
-        ch = chaine(parent, meilleure[n])
-        if sum(E[e][2] for e in ch) < 300 or not accepte(G, alt, ch, 1000 * distance_km((hub.lon, hub.lat), coords[n])):
-            continue
-        for e in ch:
-            poids[e] += POIDS_PISTE_PAR_KM * min(km, 10.0)
-    for c in coms.itertuples():
-        if c.code == hub_code:
-            continue
-        n, d = plus_proche(coords, atteints, (c.lon, c.lat))
-        if d > SNAP_MAX_M:
-            continue
-        ch = chaine(parent, meilleure[n])
-        if not accepte(G, alt, ch, 1000 * distance_km((hub.lon, hub.lat), (c.lon, c.lat))):
-            continue
-        w = 1.0 + float(c.pop) * (50.0 if pd.isna(c.score) else float(c.score)) / 100
-        for e in ch:
-            poids[e] += w
+
+    def passage():
+        """Plus courts chemins puis communes / pistes atteignables -> (parent, poids par arete, paires d'aretes utilisees)."""
+        dist, parent = dijkstra(G, n_hub)
+        meilleure = {}
+        for e, d in enumerate(dist):
+            if d < math.inf and (E[e][1] not in meilleure or d < dist[meilleure[E[e][1]]]):
+                meilleure[E[e][1]] = e
+        poids = defaultdict(float)
+        if not meilleure:
+            return parent, poids, set()
+        atteints = {n: coords[n] for n in meilleure}
+        for cid, km in km_piste.items():  # pistes deja amenagees a rejoindre : on vise leur noeud le plus proche du pole
+            noeuds_c = [n for n in meilleure if comp_piste.get(n) == cid]
+            if not noeuds_c:
+                continue
+            n = min(noeuds_c, key=lambda x: dist[meilleure[x]])
+            ch = chaine(parent, meilleure[n])
+            if sum(E[e][2] for e in ch) < 300 or not accepte(G, alt, ch, 1000 * distance_km((hub.lon, hub.lat), coords[n])):
+                continue
+            for e in ch:
+                poids[e] += POIDS_PISTE_PAR_KM * min(km, 10.0)
+        for c in coms.itertuples():
+            if c.code == hub_code:
+                continue
+            n, d = plus_proche(coords, atteints, (c.lon, c.lat))
+            if d > SNAP_MAX_M:
+                continue
+            ch = chaine(parent, meilleure[n])
+            if not accepte(G, alt, ch, 1000 * distance_km((hub.lon, hub.lat), (c.lon, c.lat))):
+                continue
+            w = 1.0 + float(c.pop) * (50.0 if pd.isna(c.score) else float(c.score)) / 100
+            for e in ch:
+                poids[e] += w
+        return parent, poids, {frozenset((E[e][0], E[e][1])) for e in poids}
+
+    for _ in range(PASSES_PARTAGE - 1):  # chaque passe rend moins cheres les aretes deja utilisees : les branches partagent un tronc
+        _p, _w, paires = passage()
+        if not paires:
+            return []
+        G.partager(paires)
+    parent, poids, _ = passage()
+    if not poids:
+        return []
     enfants = defaultdict(list)
     for e in poids:
         enfants[parent[e]].append(e)
