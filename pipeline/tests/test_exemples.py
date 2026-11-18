@@ -194,3 +194,9 @@ def test_cinq_branches_au_plus():
     alt = {n: 0.0 for n in coords}
     t = exemples.traces_epci(communes_test(), exemples.construire_graphe(coords, aretes, alt), coords, alt, "A")
     assert 1 <= len(t) <= 5
+
+
+def test_choisir_departement():
+    c = pd.DataFrame({"code": list("abcdefghij"), "dep": ["03"] * 6 + ["63"] * 2 + ["03", "63"],
+                      "epci": ["E1"] * 6 + ["E2"] * 3 + ["E3"], "pop": 100})
+    assert exemples.choisir_departement(c, "03") == ["E1"]  # E2 : 1 commune sur 3 seulement ; E3 : trop petit

@@ -121,6 +121,13 @@ def choisir_epci(communes, n=10):
     return choix
 
 
+def choisir_departement(communes, dep):
+    """Tous les EPCI dont la majorite des communes est dans le departement `dep` (code INSEE, ex. "03"), sans critere de ruralite."""
+    c = communes.dropna(subset=["epci"])
+    part = c.assign(dedans=c["dep"].astype(str) == str(dep)).groupby("epci")["dedans"].agg(["mean", "size"])
+    return list(part[(part["mean"] > 0.5) & (part["size"] >= 5)].index)
+
+
 # ------------------------------------------------------------------ reseau OSM
 def telecharger_reseau(bbox, marge=0.03):
     """Voies OSM de l'emprise (lon min, lat min, lon max, lat max) elargie de `marge` degres -> elements Overpass (geometrie)."""
@@ -591,7 +598,10 @@ def generer():
     c = c.merge(indic[["code", "grille", "score"] + (["i_relief"] if "i_relief" in indic.columns else [])].rename(columns={"i_relief": "relief"}), on="code", how="left").merge(table_epci(), on="code", how="left")
     c["rural"] = c["grille"].ge(5)  # grille de densite INSEE 5 a 7
     forces = [x for x in os.environ.get("EPCI_EXEMPLES", "").split(",") if x]
-    choix = forces or choisir_epci(c, NB_EPCI)
+    choix = choisir_epci(c, NB_EPCI)
+    for dep in [x for x in os.environ.get("DEPARTEMENTS_EXEMPLES", "03").split(",") if x]:  # departements traites en entier, en plus
+        choix += [e for e in choisir_departement(c, dep) if e not in choix]
+    choix = forces or choix
     log(f"exemples : {len(choix)} EPCI retenus : {choix}")
     reseaux = {}
     if shutil.which("osmium"):
