@@ -42,7 +42,7 @@ def main(sortie):
             if len(s):
                 s.plot(ax=ax, color=col, linewidth=2.4)
         ex[(ex["type"] == "pole") & (ex["epci"].isin(set(al["epci"])) | ex["epci"].str.startswith("liaison"))].plot(ax=ax, color="black", marker="*", markersize=120, zorder=5)
-        ax.set_title("Allier : traces par EPCI et liaisons entre poles", fontsize=10)
+        ax.set_title("Allier : traces par EPCI et liaisons entre gros villages", fontsize=10)
         ax.set_axis_off()
         fig.savefig(sortie / "allier.png", bbox_inches="tight")
         plt.close(fig)

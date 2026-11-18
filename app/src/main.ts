@@ -204,7 +204,7 @@ function monterExemples(carte: maplibregl.Map, fc: GeoJSON.FeatureCollection, in
     if (!p) return;
     surExemple = true;
     if (p.type === "pole" && p.liaison) {
-      ligne(infobulle, `${p.epci_nom}`, `liaison entre pôles d'EPCI voisins · ${p.communes_reliees} communes sur le trajet`);
+      ligne(infobulle, `${p.epci_nom}`, `liaison entre gros villages et pôles d'EPCI · ${p.communes_reliees} communes sur le trajet`);
     } else if (p.type === "pole") {
       ligne(infobulle, `${p.epci_nom} — pôle : ${p.pole}`, `${p.communes_reliees ?? "?"} communes reliées sur ${p.communes_epci}, ${Number(p.pop_epci).toLocaleString("fr-FR")} hab., ${p.traces} tracés proposés`);
     } else {

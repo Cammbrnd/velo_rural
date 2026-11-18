@@ -241,3 +241,21 @@ def test_liaison_entre_deux_poles():
     ha, hb = coms[coms.code == "A"].iloc[0], coms[coms.code == "B"].iloc[0]
     t = exemples.liaison(coms, lignes, ha, hb, tuile_png=lambda x, y, z: None)
     assert t and t["props"]["liaison"] and t["props"]["longueur_km"] > 5
+
+
+def test_liens_gros_villages():
+    pts = {"A": (3.0, 46.0), "B": (3.1, 46.0), "C": (3.2, 46.0), "D": (3.3, 46.0), "Z": (8.0, 46.0)}
+    liens = exemples.liens_gros_villages(pts)
+    assert ("A", "B") in liens and ("B", "C") in liens and ("C", "D") in liens  # arbre couvrant
+    assert ("A", "C") in liens                                              # + 2 plus proches voisins (A : B et C)
+    assert all("Z" not in x for x in liens)                                 # trop loin de tout
+
+
+def test_priorite_au_plus_gros_village():
+    coms = communes_test()
+    coms.loc[coms.code == "D", "pop"] = 2500
+    coords, aretes = exemples.aretes_osm(reseau_grille())
+    alt = {n: 0.0 for n in coords}
+    G = exemples.construire_graphe(coords, aretes, alt)
+    t = exemples.traces_epci(coms, G, coords, alt, "A", k=1)
+    assert len(t) == 1 and "Commune D" in t[0]["props"]["communes_noms"]

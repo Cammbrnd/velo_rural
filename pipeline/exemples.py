@@ -47,6 +47,9 @@ SNAP_MAX_M = 600             # le centre-bourg doit etre a moins de 600 m d'un n
 RAYON_BOURG_M = 200          # aretes a moins de 200 m d'un centre-bourg : cout reduit (les traces traversent les villages)
 FACTEUR_BOURG = 0.7
 LIAISON_MAX_KM = 60          # liaison entre deux poles d'EPCI voisins
+GROS_VILLAGE_HAB = 1500      # departement traite en entier : villages d'au moins 1 500 hab. (et poles d'EPCI) relies en priorite entre eux
+VOISIN_GROS_KM = 20.0        # + liens vers les 2 plus proches voisins a moins de 20 km (en plus de l'arbre couvrant)
+NB_GROS_EPCI = 4             # par EPCI : les 4 plus gros villages (hors pole) sont desservis en priorite
 NB_TRACES = 5                # nombre maximal de traces (branches les plus pertinentes du reseau)
 NB_EPCI = 20
 PISTE_MIN_M = 2000           # une piste existante d'au moins 2 km est un point a rejoindre
@@ -515,9 +518,9 @@ def traces_epci(coms, G, coords, alt, hub_code, k=NB_TRACES):
         for e, d in enumerate(dist):
             if d < math.inf and (E[e][1] not in meilleure or d < dist[meilleure[E[e][1]]]):
                 meilleure[E[e][1]] = e
-        poids = defaultdict(float)
+        poids, cibles = defaultdict(float), {}
         if not meilleure:
-            return parent, poids, set()
+            return parent, poids, set(), cibles
         atteints = {n: coords[n] for n in meilleure}
         for cid, km in km_piste.items():  # pistes deja amenagees a rejoindre : on vise leur noeud le plus proche du pole
             noeuds_c = [n for n in meilleure if comp_piste.get(n) == cid]
@@ -538,19 +541,22 @@ def traces_epci(coms, G, coords, alt, hub_code, k=NB_TRACES):
             ch = chaine(parent, meilleure[n])
             if not accepte(G, alt, ch, 1000 * distance_km((hub.lon, hub.lat), (c.lon, c.lat))):
                 continue
-            w = 1.0 + float(c.pop) * (50.0 if pd.isna(c.score) else float(c.score)) / 100
+            w = 1.0 + float(c.pop) * (50.0 if pd.isna(c.score) else float(c.score)) / 100 * max(1.0, float(c.pop) / 1000)  # les gros villages pesent plus que proportionnellement
+            cibles[c.code] = (n, float(c.pop))
             for e in ch:
                 poids[e] += w
-        return parent, poids, {frozenset((E[e][0], E[e][1])) for e in poids}
+        return parent, poids, {frozenset((E[e][0], E[e][1])) for e in poids}, cibles
 
     for _ in range(PASSES_PARTAGE - 1):  # chaque passe rend moins cheres les aretes deja utilisees : les branches partagent un tronc
-        _p, _w, paires = passage()
+        _p, _w, paires, _c = passage()
         if not paires:
             return []
         G.partager(paires)
-    parent, poids, _ = passage()
+    parent, poids, _, cibles = passage()
     if not poids:
         return []
+    # priorite : les plus gros villages (hors pole) doivent etre desservis par les premieres branches retenues
+    gros = {code: n for code, (n, _pop) in sorted(cibles.items(), key=lambda kv: -kv[1][1])[:NB_GROS_EPCI]}
     enfants = defaultdict(list)
     for e in poids:
         enfants[parent[e]].append(e)
@@ -562,17 +568,23 @@ def traces_epci(coms, G, coords, alt, hub_code, k=NB_TRACES):
         return e
 
     tetes = sorted((e for p, es in enfants.items() for e in es if p == -1 or lourd[p] != e), key=lambda e: -poids[e])
+    cand = []
+    for tete in tetes:
+        ch = chaine(parent, prolonger(tete))
+        cand.append((tete, ch, {E[e][0] for e in ch} | {E[e][1] for e in ch}))
+    non_servis = dict(gros)
     traces, utilises = [], set()
     lat0 = float(hub.lat)
-    for tete in tetes:
-        if len(traces) >= k:
-            break
-        ch = chaine(parent, prolonger(tete))
+    while cand and len(traces) < k:
+        # branche qui dessert le plus d'habitants parmi les gros villages pas encore servis ; a egalite, la plus lourde
+        cand.sort(key=lambda x: (-sum(cibles[c][1] for c, n in non_servis.items() if n in x[2]), -poids[x[0]]))
+        tete, ch, noeuds_ch = cand.pop(0)
         aretes_chemin = [(E[e][0], E[e][1], E[e][2], E[e][3], E[e][4]) for e in ch]
         nouvelles = [a for a in aretes_chemin if frozenset(a[:2]) not in utilises]
         if sum(a[2] for a in nouvelles) < LONGUEUR_MIN_M:
             continue
         utilises |= {frozenset(a[:2]) for a in aretes_chemin}
+        non_servis = {c: n for c, n in non_servis.items() if n not in noeuds_ch}
         noeuds_chemin = [aretes_chemin[0][0]] + [a[1] for a in aretes_chemin]
         t = decrire(coms, coords, alt, noeuds_chemin, aretes_chemin, nouvelles, lat0, hub)
         rejointes = {comp_piste[n] for n in noeuds_chemin if n in comp_piste and km_piste.get(comp_piste[n], 0) * 1000 >= PISTE_MIN_M}
@@ -649,6 +661,15 @@ def mst_liaisons(hubs):
     return liens
 
 
+def liens_gros_villages(pts, voisins=2):
+    """{code: (lon, lat)} -> [(a, b)] : arbre couvrant minimal + liens vers les `voisins` plus proches a moins de VOISIN_GROS_KM."""
+    liens = {tuple(sorted(x)) for x in mst_liaisons(pts)}
+    for a in pts:
+        proches = sorted((b for b in pts if b != a and distance_km(pts[a], pts[b]) <= VOISIN_GROS_KM), key=lambda b: distance_km(pts[a], pts[b]))[:voisins]
+        liens |= {tuple(sorted((a, b))) for b in proches}
+    return sorted(liens)
+
+
 def liaison(coms_ab, lignes, hub_a, hub_b, tuile_png=relief.telecharger_tuile):
     """Trace reliant les poles de deux EPCI voisins (meme modele de cout : pentes, virages, bourgs, pistes existantes).
     -> trace (dict de decrire) ou None si aucun chemin raisonnable."""
@@ -711,25 +732,20 @@ def generer():
         choix += [e for e in choisir_departement(c, dep) if e not in choix]
     choix = forces or choix
     log(f"exemples : {len(choix)} EPCI retenus : {choix}")
-    # liaisons : poles des EPCI d'un meme departement traite en entier, relies par un arbre couvrant minimal
+    # liaisons prioritaires : entre les plus gros villages (>= GROS_VILLAGE_HAB) et les poles des EPCI d'un meme departement traite en entier
     liens = []
     for dep in [x for x in os.environ.get("DEPARTEMENTS_EXEMPLES", "03").split(",") if x]:
-        hubs = {}
-        for e in choix:
-            ce = c[c.epci == e]
-            if (ce.dep.astype(str) == dep).mean() > 0.5:
-                h = ce.sort_values("pop", ascending=False).iloc[0]
-                hubs[e] = (h.lon, h.lat)
-        liens += [(a, b, dep) for a, b in mst_liaisons(hubs)]
-    cles = {f"liaison-{a}-{b}": (a, b) for a, b, _ in liens}
+        ce = c[c.epci.isin(choix) & (c.dep.astype(str) == dep)]
+        pts = {r.code: (r.lon, r.lat) for r in ce[ce["pop"] >= GROS_VILLAGE_HAB].itertuples()}
+        for e in ce.epci.unique():
+            h = ce[ce.epci == e].sort_values("pop", ascending=False).iloc[0]
+            pts[h.code] = (h.lon, h.lat)
+        liens += liens_gros_villages(pts)
+    log(f"exemples : {len(liens)} liaisons entre gros villages a etudier")
     reseaux, lieux = {}, {}
     if shutil.which("osmium"):
         emprises = {e: (c[c.epci == e].lon.min(), c[c.epci == e].lat.min(), c[c.epci == e].lon.max(), c[c.epci == e].lat.max()) for e in choix}
         deps = {e: set(c[c.epci == e].dep.astype(str)) for e in choix}
-        for k, (a, b) in cles.items():
-            ha, hb = (c[c.epci == x].sort_values("pop", ascending=False).iloc[0] for x in (a, b))
-            emprises[k] = (min(ha.lon, hb.lon) - 0.05, min(ha.lat, hb.lat) - 0.05, max(ha.lon, hb.lon) + 0.05, max(ha.lat, hb.lat) + 0.05)
-            deps[k] = deps[a] | deps[b]
         try:
             reseaux = reseaux_geofabrik(emprises, deps, lieux)
         except Exception as e:  # noqa: BLE001
@@ -751,20 +767,29 @@ def generer():
             log(f"  {nom} ({code}) : {len(traces)} traces, {resume['communes_reliees']}/{len(coms)} communes reliees, pole {hub.nom}")
         except Exception as e:  # noqa: BLE001
             log(f"  [!] {nom} ({code}) ignore : {e}")
-    for k, (a, b) in cles.items():
+    tous = pd.concat(coms_b.values(), ignore_index=True).drop_duplicates("code").set_index("code", drop=False) if coms_b else pd.DataFrame(index=[])
+    for a, b in liens:
         try:
-            if a not in coms_b or b not in coms_b or reseaux.get(k) is None:
+            if a not in tous.index or b not in tous.index:
                 continue
-            ha, hb = (coms_b[x].sort_values("pop", ascending=False).iloc[0] for x in (a, b))
-            t = liaison(pd.concat([coms_b[a], coms_b[b]], ignore_index=True), reseaux[k], ha, hb)
+            ha, hb = tous.loc[a], tous.loc[b]
+            w, s_, e_, n_ = min(ha.lon, hb.lon) - 0.08, min(ha.lat, hb.lat) - 0.08, max(ha.lon, hb.lon) + 0.08, max(ha.lat, hb.lat) + 0.08
+            morceaux = [reseaux[e].cx[w:e_, s_:n_] for e in coms_b if e in reseaux]
+            morceaux = [m for m in morceaux if len(m)]
+            if not morceaux:
+                continue
+            lignes = pd.concat(morceaux, ignore_index=True)
+            lignes = lignes.loc[~lignes.geometry.to_wkb().duplicated()]  # les emprises d'EPCI voisins se recouvrent
+            zone = tous[tous.lon.between(w, e_) & tous.lat.between(s_, n_)]
+            t = liaison(zone, lignes, ha, hb)
             if t is None:
                 continue
             nom = f"Liaison {ha.nom} - {hb.nom}"
             resume = dict(liaison=True, communes_epci=0, communes_reliees=len(t["codes"]), pop_epci=0, score_moyen=None, traces=1)
-            resultats.append((k, nom, ha, [t], resume))
+            resultats.append((f"liaison-{a}-{b}", nom, ha, [t], resume))
             log(f"  {nom} : {t['props']['longueur_km']} km, existant {t['props']['pct_adapte']} % adapte, {len(t['codes'])} communes sur le trajet")
         except Exception as e:  # noqa: BLE001
-            log(f"  [!] liaison {k} ignoree : {type(e).__name__} {e}")
+            log(f"  [!] liaison {a}-{b} ignoree : {type(e).__name__} {e}")
     if not resultats:
         log("[!] aucun exemple produit : exemples.geojson non ecrit")
         return
