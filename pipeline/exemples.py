@@ -62,6 +62,12 @@ MONTEE_MAX_M_KM = 22.0       # montee cumulee maximale par km
 CHANGEMENTS_MAX_KM = 4.0     # changements de route par km au plus
 RURAL_MIN = 0.95             # part de communes rurales (grille de densite 5 a 7) d'au moins 95 %
 HUB_MAX = 15000              # pole de moins de 15 000 hab. (pas une ville)
+HUB_MIN = 1500               # pole d'au moins 1 500 hab.
+EPCI_COMMUNES = (10, 60)     # EPCI de 10 a 60 communes
+EPCI_ETENDUE_MAX_KM = 80     # etendue (diagonale) de 80 km au plus
+EPCI_POP_MIN = 8000          # au moins 8 000 hab.
+DEP_PART_MIN = 0.5           # departement traite en entier : EPCI dont plus de la moitie des communes sont dans le departement...
+DEP_COMMUNES_MIN = 5         # ... et d'au moins 5 communes
 RELIEF_MIN = 45.0            # EPCI retenus : indicateur de relief moyen (0-100, 100 = plat) d'au moins 45 (pas de haute montagne)
 ZOOM_MNT = 11
 
@@ -113,7 +119,7 @@ def choisir_epci(communes, n=10):
         "lon": g["lon"].mean(), "lat": g["lat"].mean(), "dep": g["dep"].agg(lambda s: s.mode().iat[0]),
         "etendue": g.apply(lambda d: distance_km((d.lon.min(), d.lat.min()), (d.lon.max(), d.lat.max())), include_groups=False),
     })
-    cand = e[(e.n.between(10, 60)) & (e.rural >= RURAL_MIN) & (e.etendue <= 80) & (e.hub.between(1500, HUB_MAX)) & (e["pop"] >= 8000) & (e.relief >= RELIEF_MIN)].sort_values("score", ascending=False)
+    cand = e[(e.n.between(*EPCI_COMMUNES)) & (e.rural >= RURAL_MIN) & (e.etendue <= EPCI_ETENDUE_MAX_KM) & (e.hub.between(HUB_MIN, HUB_MAX)) & (e["pop"] >= EPCI_POP_MIN) & (e.relief >= RELIEF_MIN)].sort_values("score", ascending=False)
     if cand.empty:
         return []
     choix = [cand.index[0]]
@@ -131,7 +137,7 @@ def choisir_departement(communes, dep):
     """Tous les EPCI dont la majorite des communes est dans le departement `dep` (code INSEE, ex. "03"), sans critere de ruralite."""
     c = communes.dropna(subset=["epci"])
     part = c.assign(dedans=c["dep"].astype(str) == str(dep)).groupby("epci")["dedans"].agg(["mean", "size"])
-    return list(part[(part["mean"] > 0.5) & (part["size"] >= 5)].index)
+    return list(part[(part["mean"] > DEP_PART_MIN) & (part["size"] >= DEP_COMMUNES_MIN)].index)
 
 
 # ------------------------------------------------------------------ reseau OSM

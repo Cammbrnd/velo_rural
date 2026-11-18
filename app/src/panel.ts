@@ -47,7 +47,7 @@ export function monterPanneau(root: HTMLElement, cfg: Config, table: Ligne[], et
 
   root.innerHTML = `
     <h1>Potentiel vélo en milieu rural</h1>
-    <p class="sous">Croise usage potentiel, faisabilité d'aménagement et déficit d'équipement, à l'échelle communale. <a href="./resultats.html">Voir le classement →</a></p>
+    <p class="sous">Croise usage potentiel, faisabilité d'aménagement et déficit d'équipement, à l'échelle communale. <a href="./resultats.html">Voir le classement →</a> · <a href="./seuils.html">Seuils retenus →</a></p>
     ${cfg.demo ? `<div class="bandeau"><b>Données de démonstration (synthétiques).</b> Les cellules affichées ne sont pas des communes réelles ; elles servent à tester l'interface.</div>` : ""}
 
     <h2>Affichage</h2>

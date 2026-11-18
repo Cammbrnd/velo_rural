@@ -5,9 +5,10 @@ import assembler
 import controle
 import exemples
 import exporter
+import seuils
 import telecharger
 
-ETAPES = {"telecharger": telecharger.main, "assembler": assembler.main, "controle": controle.main, "exporter": exporter.main, "exemples": exemples.main}
+ETAPES = {"telecharger": telecharger.main, "assembler": assembler.main, "controle": controle.main, "exporter": exporter.main, "exemples": exemples.main, "seuils": seuils.main}
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()

@@ -19,6 +19,7 @@ from outils import log, percentile, telecharger
 
 HIGHWAY_RETENUS = ("residential", "living_street", "unclassified", "tertiary", "track")
 REVETUS = {"asphalt", "paved", "concrete", "concrete:plates", "concrete:lanes", "paving_stones", "sett", "compacted", "fine_gravel"}
+VITESSE_MAX = 50  # km/h : une voie limitee a plus est exclue des routes calmes
 _TAG = re.compile(r'"([^"]+)"=>"((?:[^"\\]|\\.)*)"')
 
 
@@ -37,15 +38,15 @@ def vitesse(t):
 
 def est_calme_voie(highway, t):
     """Vrai si la voie est secondaire ET peu rapide et ouverte aux velos :
-    residentielle / living_street / non classee (sauf maxspeed > 50) ; tertiaire seulement si limitee a 50 ;
+    residentielle / living_street / non classee (sauf maxspeed > VITESSE_MAX) ; tertiaire seulement si limitee a VITESSE_MAX ;
     piste (track) seulement si revetue ou de bonne tenue (tracktype grade1-2). Exclut acces interdit/prive et bicycle=no."""
     if t.get("bicycle") in ("no", "dismount") or t.get("access") in ("no", "private") or t.get("vehicle") == "no":
         return False
     v = vitesse(t)
     if highway in ("residential", "living_street", "unclassified"):
-        return not v > 50
+        return not v > VITESSE_MAX
     if highway == "tertiary":
-        return v <= 50
+        return v <= VITESSE_MAX
     if highway == "track":
         return t.get("tracktype") in ("grade1", "grade2") or t.get("surface") in REVETUS
     return False
