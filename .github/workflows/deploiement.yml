@@ -26,6 +26,10 @@ jobs:
   construire:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    permissions:
+      contents: write   # branche "apercu" (images de verification des exemples)
+      pages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -61,6 +65,18 @@ jobs:
         env:
           ROUTES_CALMES: ${{ (inputs.routes_calmes || github.event_name == 'schedule') && '1' || '0' }}
         run: python lancer.py
+      - name: Apercus des exemples (branche apercu)
+        continue-on-error: true
+        working-directory: pipeline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pip install -q matplotlib
+          python apercu.py ../apercu
+          rm -rf /tmp/ap && mkdir /tmp/ap && cp ../apercu/*.png /tmp/ap/ && cd /tmp/ap
+          git init -q -b apercu && git config user.name "github-actions" && git config user.email "actions@users.noreply.github.com"
+          git add -A && git commit -q -m "apercus du run $GITHUB_RUN_ID"
+          git push -q --force "https://x-access-token:$GH_TOKEN@github.com/${{ github.repository }}.git" apercu
       - name: Rapport du pipeline dans le resume du job
         if: always()
         run: |
