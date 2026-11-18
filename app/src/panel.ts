@@ -1,5 +1,6 @@
 import { AXES, GRILLE_RURAL_MIN, INDICATEURS } from "./indicators";
 import { couverture, type Config } from "./data";
+import { rendreSeuils } from "./seuils";
 import {
   RAMPE, SANS_DONNEE, SEUILS_DEFAUT, libellesClasses, poidsParDefaut, profil, scoreAxe, scoreMode, seuilsRelatifs,
   type Ligne, type Mode, type Poids, type Seuils,
@@ -47,7 +48,9 @@ export function monterPanneau(root: HTMLElement, cfg: Config, table: Ligne[], et
 
   root.innerHTML = `
     <h1>Potentiel vélo en milieu rural</h1>
-    <p class="sous">Croise usage potentiel, faisabilité d'aménagement et déficit d'équipement, à l'échelle communale. <a href="./resultats.html">Voir le classement →</a> · <a href="./seuils.html">Seuils retenus →</a></p>
+    <p class="sous">Croise usage potentiel, faisabilité d'aménagement et déficit d'équipement, à l'échelle communale. <a href="./resultats.html">Voir le classement →</a></p>
+    <p><button type="button" id="ouvrir-seuils">Seuils retenus</button></p>
+    <dialog id="fenetre-seuils" aria-label="Seuils retenus"><div class="entete"><h1>Seuils retenus</h1><button type="button" id="fermer-seuils">Fermer</button></div><div id="contenu-seuils"></div></dialog>
     ${cfg.demo ? `<div class="bandeau"><b>Données de démonstration (synthétiques).</b> Les cellules affichées ne sont pas des communes réelles ; elles servent à tester l'interface.</div>` : ""}
 
     <h2>Affichage</h2>
@@ -154,6 +157,15 @@ export function monterPanneau(root: HTMLElement, cfg: Config, table: Ligne[], et
   };
 
   // ---- evenements ----
+  const fenetre = $<HTMLDialogElement>("#fenetre-seuils");
+  $("#ouvrir-seuils").addEventListener("click", async () => {
+    fenetre.showModal();
+    if (!fenetre.dataset.charge) {
+      $("#contenu-seuils").innerHTML = await rendreSeuils();
+      fenetre.dataset.charge = "1";
+    }
+  });
+  $("#fermer-seuils").addEventListener("click", () => fenetre.close());
   $<HTMLSelectElement>("#mode").addEventListener("change", (e) => {
     etat.mode = (e.target as HTMLSelectElement).value as Mode;
     rappels.onChange();

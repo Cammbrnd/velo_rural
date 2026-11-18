@@ -62,3 +62,11 @@ td.num, th.num { text-align: right; }
 .legende-ex { list-style: none; padding: 0; margin: 6px 0 0; font-size: 12px; }
 .legende-ex li { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
 .legende-ex i { display: inline-block; width: 22px; height: 4px; border-radius: 2px; }
+
+#fenetre-seuils { width: min(1100px, 94vw); max-height: 90vh; overflow-y: auto; border: 1px solid var(--ligne); border-radius: 8px; padding: 16px 20px 28px; background: var(--surface); }
+#fenetre-seuils::backdrop { background: rgba(0, 0, 0, .35); }
+#fenetre-seuils .entete { display: flex; justify-content: space-between; align-items: center; position: sticky; top: -16px; background: var(--surface); padding: 8px 0; }
+#fenetre-seuils h1 { margin: 0; }
+table.seuils { margin-top: 10px; }
+table.seuils th, table.seuils td { text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid var(--ligne); }
+table.seuils th { font-size: 12px; color: var(--ink-2); }

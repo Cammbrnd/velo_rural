@@ -1,4 +1,3 @@
-import "./resultats.css";
 import { AXES, GRILLE_RURAL_MIN, INDICATEURS } from "./indicators";
 import { SEUIL_FAISABILITE, SEUIL_USAGE, SEUILS } from "./score";
 
@@ -36,8 +35,7 @@ function sectionPipeline(s: Section): string {
     ${table(s.items.map((i) => [i.nom, `${i.valeur}${i.unite ? " " + i.unite : ""}`, i.role, i.fichier]), ["Seuil", "Valeur", "Rôle", "Fichier"])}`;
 }
 
-async function main() {
-  const racine = document.getElementById("page")!;
+export async function rendreSeuils(): Promise<string> {
   let sections: Section[] = [];
   let erreur = "";
   try {
@@ -47,14 +45,8 @@ async function main() {
   } catch (e) {
     erreur = `Les seuils du pipeline n'ont pas pu être chargés (${e instanceof Error ? e.message : e}).`;
   }
-  racine.innerHTML = `
-    <header>
-      <div><h1>Seuils retenus</h1>
-        <p class="sous">Tous les paramètres chiffrés du score et des tracés d'exemple. Ce sont des choix de conception, pas des normes : ils sont à discuter et à ajuster. Les valeurs sont lues dans le code à chaque déploiement.</p></div>
-      <span><a href="./index.html">Carte →</a> · <a href="./resultats.html">Classement →</a></span>
-    </header>
+  return `
+    <p class="desc">Tous les paramètres chiffrés du score et des tracés d'exemple. Ce sont des choix de conception, pas des normes : ils sont à discuter et à ajuster. Les valeurs sont lues dans le code à chaque déploiement.</p>
     ${sectionScore()}
     ${erreur ? `<div class="bandeau">${esc(erreur)}</div>` : sections.map(sectionPipeline).join("")}`;
 }
-
-main();

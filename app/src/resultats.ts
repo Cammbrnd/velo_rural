@@ -29,7 +29,7 @@ async function main() {
     <header>
       <div><h1>Potentiel vélo en milieu rural — résultats</h1>
         <p class="sous">Classement des communes selon l'usage potentiel, la faisabilité d'aménagement et le déficit d'équipement.</p></div>
-      <span><a href="./index.html">Ouvrir la carte →</a> · <a href="./seuils.html">Seuils →</a></span>
+      <a href="./index.html">Ouvrir la carte →</a>
     </header>
     ${cfg.demo ? `<div class="bandeau"><b>Données de démonstration (synthétiques).</b> Les lignes ne sont pas de vraies communes.</div>` : ""}
     <section class="controles" aria-label="Filtres et pondération">
