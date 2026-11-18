@@ -26,7 +26,29 @@ def main(sortie):
     carte = carte.merge(table_epci(), on="code", how="left").to_crs(2154)
     f = cfg.DOSSIER_BRUT / "pistes.geojson"
     pistes = gpd.read_file(f).to_crs(2154) if f.exists() else None
+    # vue d'ensemble de l'Allier : tous les EPCI traites et les liaisons entre poles
+    al = carte[carte["dep"].astype(str) == "03"]
+    if len(al):
+        x0, y0, x1, y1 = al.total_bounds
+        fig, ax = plt.subplots(figsize=(11, 11 * (y1 - y0) / (x1 - x0)), dpi=90)
+        al.plot(ax=ax, color="#f6f3ea", edgecolor="#999999", linewidth=0.4)
+        al.dissolve(by="epci").boundary.plot(ax=ax, color="#555555", linewidth=1.2)
+        if pistes is not None:
+            p = pistes.cx[x0:x1, y0:y1]
+            p[p["type"] == "piste"].plot(ax=ax, color="#7b2d8e", linewidth=1.0)
+        tr = ex[(ex["type"] == "trace") & (ex["epci"].isin(set(al["epci"])) | ex["epci"].str.startswith("liaison"))]
+        for cat, col in COUL.items():
+            s = tr[tr["categorie"] == cat]
+            if len(s):
+                s.plot(ax=ax, color=col, linewidth=2.4)
+        ex[(ex["type"] == "pole") & (ex["epci"].isin(set(al["epci"])) | ex["epci"].str.startswith("liaison"))].plot(ax=ax, color="black", marker="*", markersize=120, zorder=5)
+        ax.set_title("Allier : traces par EPCI et liaisons entre poles", fontsize=10)
+        ax.set_axis_off()
+        fig.savefig(sortie / "allier.png", bbox_inches="tight")
+        plt.close(fig)
     for epci, t in ex.groupby("epci"):
+        if str(epci).startswith("liaison"):
+            continue
         coms = carte[carte.epci == epci]
         x0, y0, x1, y1 = coms.total_bounds
         m = 2500

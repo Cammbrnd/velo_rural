@@ -42,8 +42,11 @@ PENALITE_CHANGEMENT_PISTE = 60.0  # idem quand l'une des deux voies est un amena
 FACTEUR_PARTAGE = 0.7        # cout des aretes deja utilisees par un autre chemin : les branches partagent un tronc au lieu de longer en parallele
 PASSES_PARTAGE = 3
 PENALITE_VIRAGE = ((150, math.inf), (120, 150.0), (60, 80.0), (30, 25.0))  # (angle mini en degres, penalite en m)
-RAYON_DESSERTE_M = 600       # une commune est desservie si son bourg est a moins de 600 m de la trace
-SNAP_MAX_M = 2000
+RAYON_DESSERTE_M = 300       # une commune est desservie si la trace passe a moins de 300 m de son centre-bourg
+SNAP_MAX_M = 600             # le centre-bourg doit etre a moins de 600 m d'un noeud du reseau
+RAYON_BOURG_M = 200          # aretes a moins de 200 m d'un centre-bourg : cout reduit (les traces traversent les villages)
+FACTEUR_BOURG = 0.7
+LIAISON_MAX_KM = 60          # liaison entre deux poles d'EPCI voisins
 NB_TRACES = 5                # nombre maximal de traces (branches les plus pertinentes du reseau)
 NB_EPCI = 20
 PISTE_MIN_M = 2000           # une piste existante d'au moins 2 km est un point a rejoindre
@@ -234,7 +237,52 @@ def extraire_reseau(pbf, bbox, tmp, nom, marge=0.03):
     return g if len(g) else None
 
 
-def reseaux_geofabrik(emprises, deps):
+def extraire_lieux(pbf, bbox, tmp, nom, marge=0.03):
+    """Noeuds place=city|town|village|hamlet de l'emprise -> GeoDataFrame [name, place, geometry] (ou None)."""
+    w, s_, e, n = bbox[0] - marge, bbox[1] - marge, bbox[2] + marge, bbox[3] + marge
+    part, filtre = Path(tmp) / f"{nom}.p.osm.pbf", Path(tmp) / f"{nom}.lieux.osm.pbf"
+    subprocess.run(["osmium", "extract", "-b", f"{w},{s_},{e},{n}", str(pbf), "-o", str(part), "--overwrite"], check=True)
+    subprocess.run(["osmium", "tags-filter", str(part), "n/place=city,town,village,hamlet", "-o", str(filtre), "--overwrite"], check=True)
+    g = gpd.read_file(filtre, engine="pyogrio", sql="SELECT name, place FROM points WHERE place IN ('city','town','village','hamlet')")
+    part.unlink(missing_ok=True)
+    filtre.unlink(missing_ok=True)
+    return g if len(g) else None
+
+
+def normaliser(nom):
+    import unicodedata
+    t = unicodedata.normalize("NFKD", str(nom)).encode("ascii", "ignore").decode().lower()
+    t = re.sub(r"[^a-z0-9]+", " ", t).strip()
+    return re.sub(r"\bsaint(e?)\b", lambda m: "st" + m.group(1), t)
+
+
+RANG_LIEU = {"city": 0, "town": 1, "village": 2, "hamlet": 3}
+
+
+def bourgs(coms, lieux):
+    """Remplace lon/lat (point interieur de la commune) par le centre-bourg : noeud place=* de meme nom (sinon le plus gros lieu
+    a moins de 1,5 km). Sans donnees, la commune garde son point interieur."""
+    coms = coms.copy()
+    if lieux is None or not len(lieux):
+        return coms
+    xs, ys = lieux.geometry.x.values, lieux.geometry.y.values
+    noms = [normaliser(x) if isinstance(x, str) else "" for x in lieux["name"]]
+    rang = np.array([RANG_LIEU.get(x, 4) for x in lieux["place"]])
+    for i, c in enumerate(coms.itertuples()):
+        d = np.hypot((xs - c.lon) * 111.32 * math.cos(math.radians(c.lat)), (ys - c.lat) * 110.54)
+        meme = np.array([n == normaliser(c.nom) for n in noms]) & (d <= 8)
+        if meme.any():
+            k = int(np.where(meme)[0][np.argmin(d[meme] + 10 * rang[meme])])
+        else:
+            proche = (d <= 1.5) & (rang <= 2)
+            if not proche.any():
+                continue
+            k = int(np.where(proche)[0][np.argmin(rang[proche] * 10 + d[proche])])
+        coms.iat[i, coms.columns.get_loc("lon")], coms.iat[i, coms.columns.get_loc("lat")] = float(xs[k]), float(ys[k])
+    return coms
+
+
+def reseaux_geofabrik(emprises, deps, lieux_out=None):
     """{epci: GeoDataFrame de voies} pour toutes les emprises, region par region (un telechargement par region)."""
     plan = regions_pour(deps)
     log(f"  reseaux OSM : {len(plan)} regions a lire ({', '.join(sorted(plan))})")
@@ -256,6 +304,13 @@ def reseaux_geofabrik(emprises, deps):
                 g = extraire_reseau(pbf, emprises[epci], tmp, f"{nom}_{epci}")
                 if g is not None:
                     morceaux[epci].append(g)
+                if lieux_out is not None:
+                    try:
+                        l = extraire_lieux(pbf, emprises[epci], tmp, f"{nom}_{epci}")
+                        if l is not None:
+                            lieux_out.setdefault(epci, []).append(l)
+                    except Exception as e:  # noqa: BLE001
+                        log(f"  [!] lieux {epci} ignores : {type(e).__name__}")
             pbf.unlink()
     return {e: pd.concat(m, ignore_index=True) for e, m in morceaux.items()}
 
@@ -301,18 +356,24 @@ class Graphe:
     """Graphe d'aretes orientees. Un etat de Dijkstra est une arete orientee : on connait ainsi la route empruntee et la
     direction d'arrivee, donc on peut penaliser les changements de route et les virages (traces en zigzag)."""
 
-    def __init__(self, coords, aretes, alt):
+    def __init__(self, coords, aretes, alt, attirants=()):
         self.coords = coords
         lat0 = float(np.mean([p[1] for p in coords.values()])) if coords else 46.0
         kx, ky = 111.32 * math.cos(math.radians(lat0)), 110.54
         self.E = []  # (u, v, longueur, categorie, route, cout, ux, uy)
         self.sortant = defaultdict(list)
-        for u, v, L, cat, route in aretes:
+        proches = np.zeros(len(aretes), dtype=bool)  # aretes a moins de RAYON_BOURG_M d'un centre-bourg
+        if len(aretes) and len(attirants):
+            mx = np.array([(coords[a[0]][0] + coords[a[1]][0]) / 2 for a in aretes])
+            my = np.array([(coords[a[0]][1] + coords[a[1]][1]) / 2 for a in aretes])
+            for lon, lat in attirants:
+                proches |= np.hypot((mx - lon) * kx, (my - lat) * ky) * 1000 <= RAYON_BOURG_M
+        for k, (u, v, L, cat, route) in enumerate(aretes):
             dz = alt.get(v, 0.0) - alt.get(u, 0.0)
             g = abs(dz) / max(L, L_MIN_PENTE)
             if g > PENTE_MAX_ARETE:
                 continue  # trop raide : personne n'y passera a velo
-            cout = L * FACTEUR[cat] * (1 + (g / PENTE_REF) ** 2) + COUT_MONTEE * abs(dz)
+            cout = L * FACTEUR[cat] * (1 + (g / PENTE_REF) ** 2) * (FACTEUR_BOURG if proches[k] else 1.0) + COUT_MONTEE * abs(dz)
             dx, dy = (coords[v][0] - coords[u][0]) * kx, (coords[v][1] - coords[u][1]) * ky
             n = math.hypot(dx, dy) or 1.0
             for a, b, sx, sy in ((u, v, dx / n, dy / n), (v, u, -dx / n, -dy / n)):
@@ -333,8 +394,8 @@ class Graphe:
         return pen + (PENALITE_CHANGEMENT_PISTE if "existant" in (a[3], b[3]) else PENALITE_CHANGEMENT)
 
 
-def construire_graphe(coords, aretes, alt):
-    return Graphe(coords, aretes, alt)
+def construire_graphe(coords, aretes, alt, attirants=()):
+    return Graphe(coords, aretes, alt, attirants)
 
 
 def dijkstra(G, source, horizon=4 * LONGUEUR_MAX_M):
@@ -568,9 +629,56 @@ def exemples_epci(code, coms, tuile_png=relief.telecharger_tuile, reseau=telecha
         bbox = (coms.lon.min(), coms.lat.min(), coms.lon.max(), coms.lat.max())
         coords, aretes = aretes_osm(reseau(bbox))
     alt = lisser_altitudes(altitudes(coords, tuile_png), aretes)
-    G = construire_graphe(coords, aretes, alt)
+    G = construire_graphe(coords, aretes, alt, list(zip(coms.lon, coms.lat)))
     hub = coms.sort_values("pop", ascending=False).iloc[0]
     return hub, traces_epci(coms, G, coords, alt, hub.code)
+
+
+def mst_liaisons(hubs):
+    """{epci: (lon, lat)} -> [(a, b)] : arbre couvrant minimal (Prim) des poles, liaisons de moins de LIAISON_MAX_KM seulement."""
+    reste = list(hubs)
+    if len(reste) < 2:
+        return []
+    dedans, liens = {reste.pop(0)}, []
+    while reste:
+        a, b = min(((a, b) for a in dedans for b in reste), key=lambda ab: distance_km(hubs[ab[0]], hubs[ab[1]]))
+        if distance_km(hubs[a], hubs[b]) <= LIAISON_MAX_KM:
+            liens.append((a, b))
+        dedans.add(b)
+        reste.remove(b)
+    return liens
+
+
+def liaison(coms_ab, lignes, hub_a, hub_b, tuile_png=relief.telecharger_tuile):
+    """Trace reliant les poles de deux EPCI voisins (meme modele de cout : pentes, virages, bourgs, pistes existantes).
+    -> trace (dict de decrire) ou None si aucun chemin raisonnable."""
+    coords, aretes = lignes_vers_aretes(lignes)
+    alt = lisser_altitudes(altitudes(coords, tuile_png), aretes)
+    G = construire_graphe(coords, aretes, alt, list(zip(coms_ab.lon, coms_ab.lat)))
+    comp = grande_composante(G)
+    noeuds = {i: coords[i] for i in comp}
+    na, _ = plus_proche(coords, noeuds, (hub_a.lon, hub_a.lat))
+    dist, parent = dijkstra(G, na, horizon=4 * LIAISON_MAX_KM * 1000)
+    E = G.E
+    meilleure = {}
+    for e, d in enumerate(dist):
+        if d < math.inf and (E[e][1] not in meilleure or d < dist[meilleure[E[e][1]]]):
+            meilleure[E[e][1]] = e
+    if not meilleure:
+        return None
+    nb, d = plus_proche(coords, {n: coords[n] for n in meilleure}, (hub_b.lon, hub_b.lat))
+    if d > SNAP_MAX_M:
+        return None
+    ch = chaine(parent, meilleure[nb])
+    L, montee, pente, chg = profil_chemin(G, alt, ch)
+    crow = 1000 * distance_km((hub_a.lon, hub_a.lat), (hub_b.lon, hub_b.lat))
+    if L > LIAISON_MAX_KM * 1000 or L > 2.0 * crow or pente > PENTE_MAX_500M or montee / max(L / 1000, 0.1) > MONTEE_MAX_M_KM:
+        log(f"  liaison {hub_a.nom} - {hub_b.nom} : aucun chemin acceptable (L={L / 1000:.0f} km, detour {L / max(crow, 1):.1f}, pente {100 * pente:.1f} %)")
+        return None
+    ar = [(E[e][0], E[e][1], E[e][2], E[e][3], E[e][4]) for e in ch]
+    t = decrire(coms_ab, coords, alt, [ar[0][0]] + [a[1] for a in ar], ar, ar, float(hub_a.lat), hub_a)
+    t["props"]["liaison"] = True
+    return t
 
 
 def vers_geojson(resultats):
@@ -603,19 +711,36 @@ def generer():
         choix += [e for e in choisir_departement(c, dep) if e not in choix]
     choix = forces or choix
     log(f"exemples : {len(choix)} EPCI retenus : {choix}")
-    reseaux = {}
+    # liaisons : poles des EPCI d'un meme departement traite en entier, relies par un arbre couvrant minimal
+    liens = []
+    for dep in [x for x in os.environ.get("DEPARTEMENTS_EXEMPLES", "03").split(",") if x]:
+        hubs = {}
+        for e in choix:
+            ce = c[c.epci == e]
+            if (ce.dep.astype(str) == dep).mean() > 0.5:
+                h = ce.sort_values("pop", ascending=False).iloc[0]
+                hubs[e] = (h.lon, h.lat)
+        liens += [(a, b, dep) for a, b in mst_liaisons(hubs)]
+    cles = {f"liaison-{a}-{b}": (a, b) for a, b, _ in liens}
+    reseaux, lieux = {}, {}
     if shutil.which("osmium"):
         emprises = {e: (c[c.epci == e].lon.min(), c[c.epci == e].lat.min(), c[c.epci == e].lon.max(), c[c.epci == e].lat.max()) for e in choix}
+        deps = {e: set(c[c.epci == e].dep.astype(str)) for e in choix}
+        for k, (a, b) in cles.items():
+            ha, hb = (c[c.epci == x].sort_values("pop", ascending=False).iloc[0] for x in (a, b))
+            emprises[k] = (min(ha.lon, hb.lon) - 0.05, min(ha.lat, hb.lat) - 0.05, max(ha.lon, hb.lon) + 0.05, max(ha.lat, hb.lat) + 0.05)
+            deps[k] = deps[a] | deps[b]
         try:
-            deps = {e: set(c[c.epci == e].dep.astype(str)) for e in choix}
-            reseaux = reseaux_geofabrik(emprises, deps)
+            reseaux = reseaux_geofabrik(emprises, deps, lieux)
         except Exception as e:  # noqa: BLE001
             log(f"  [!] extraits Geofabrik indisponibles ({type(e).__name__} {e}) : repli sur Overpass")
     else:
         log("  osmium absent : repli sur Overpass (public, limite en debit)")
-    resultats = []
+    lieux = {k: pd.concat(v, ignore_index=True) for k, v in lieux.items()}
+    resultats, coms_b = [], {}
     for code in choix:
-        coms = c[c.epci == code]
+        coms = bourgs(c[c.epci == code], lieux.get(code))  # les traces visent et traversent le centre-bourg
+        coms_b[code] = coms
         nom = coms.epci_nom.iat[0]
         try:
             hub, traces = exemples_epci(code, coms, lignes=reseaux.get(code))
@@ -626,6 +751,20 @@ def generer():
             log(f"  {nom} ({code}) : {len(traces)} traces, {resume['communes_reliees']}/{len(coms)} communes reliees, pole {hub.nom}")
         except Exception as e:  # noqa: BLE001
             log(f"  [!] {nom} ({code}) ignore : {e}")
+    for k, (a, b) in cles.items():
+        try:
+            if a not in coms_b or b not in coms_b or reseaux.get(k) is None:
+                continue
+            ha, hb = (coms_b[x].sort_values("pop", ascending=False).iloc[0] for x in (a, b))
+            t = liaison(pd.concat([coms_b[a], coms_b[b]], ignore_index=True), reseaux[k], ha, hb)
+            if t is None:
+                continue
+            nom = f"Liaison {ha.nom} - {hb.nom}"
+            resume = dict(liaison=True, communes_epci=0, communes_reliees=len(t["codes"]), pop_epci=0, score_moyen=None, traces=1)
+            resultats.append((k, nom, ha, [t], resume))
+            log(f"  {nom} : {t['props']['longueur_km']} km, existant {t['props']['pct_adapte']} % adapte, {len(t['codes'])} communes sur le trajet")
+        except Exception as e:  # noqa: BLE001
+            log(f"  [!] liaison {k} ignoree : {type(e).__name__} {e}")
     if not resultats:
         log("[!] aucun exemple produit : exemples.geojson non ecrit")
         return

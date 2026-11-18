@@ -1,9 +1,11 @@
 import sys
 from pathlib import Path
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
+from shapely.geometry import Point
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import exemples  # noqa: E402
@@ -200,3 +202,42 @@ def test_choisir_departement():
     c = pd.DataFrame({"code": list("abcdefghij"), "dep": ["03"] * 6 + ["63"] * 2 + ["03", "63"],
                       "epci": ["E1"] * 6 + ["E2"] * 3 + ["E3"], "pop": 100})
     assert exemples.choisir_departement(c, "03") == ["E1"]  # E2 : 1 commune sur 3 seulement ; E3 : trop petit
+
+
+def test_bourgs_et_normalisation():
+    assert exemples.normaliser("Saint-Étienne-de-Lisse") == exemples.normaliser("St Etienne de Lisse")
+    coms = pd.DataFrame({"code": ["1", "2", "3"], "nom": ["Saint-Pourçain", "Lieu", "Rien"], "pop": 1, "lon": [3.0, 3.2, 3.4], "lat": [46.0, 46.0, 46.0]})
+    lieux = gpd.GeoDataFrame({"name": ["Saint Pourcain", "Hameau X", "Autre"], "place": ["town", "village", "hamlet"],
+                              "geometry": [Point(3.003, 46.002), Point(3.201, 46.001), Point(3.6, 46.0)]}, crs=4326)
+    b = exemples.bourgs(coms, lieux)
+    assert (b.lon.iat[0], b.lat.iat[0]) == (3.003, 46.002)       # meme nom
+    assert (b.lon.iat[1], b.lat.iat[1]) == (3.201, 46.001)       # a defaut, un village proche
+    assert (b.lon.iat[2], b.lat.iat[2]) == (3.4, 46.0)           # rien de proche : point interieur conserve
+
+
+def test_mst_liaisons():
+    hubs = {"A": (3.0, 46.0), "B": (3.3, 46.0), "C": (3.6, 46.0), "D": (8.0, 46.0)}
+    liens = exemples.mst_liaisons(hubs)
+    assert sorted(tuple(sorted(x)) for x in liens) == [("A", "B"), ("B", "C")]  # D trop loin
+
+
+def test_traversee_du_bourg():
+    # deux routes de A vers B de longueur voisine : celle qui traverse le bourg intermediaire est preferee
+    coords, aretes = exemples.aretes_osm(reseau_grille())
+    alt = {n: 0.0 for n in coords}
+    G0 = exemples.construire_graphe(coords, aretes, alt)
+    u, v = aretes[0][:2]
+    milieu = ((coords[u][0] + coords[v][0]) / 2, (coords[u][1] + coords[v][1]) / 2)
+    G1 = exemples.construire_graphe(coords, aretes, alt, [milieu])
+    assert sum(G1.cout) < sum(G0.cout)
+
+
+def test_liaison_entre_deux_poles():
+    from shapely.geometry import LineString
+    els = reseau_grille(7)
+    lignes = gpd.GeoDataFrame({"highway": [e["tags"]["highway"] for e in els], "other_tags": [None] * len(els),
+                               "geometry": [LineString([(p["lon"], p["lat"]) for p in e["geometry"]]) for e in els]}, crs=4326)
+    coms = communes_test()
+    ha, hb = coms[coms.code == "A"].iloc[0], coms[coms.code == "B"].iloc[0]
+    t = exemples.liaison(coms, lignes, ha, hb, tuile_png=lambda x, y, z: None)
+    assert t and t["props"]["liaison"] and t["props"]["longueur_km"] > 5
