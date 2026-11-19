@@ -58,6 +58,12 @@ jobs:
             pipeline/donnees_brutes/pistes.geojson
           key: routes-calmes-v2-${{ steps.mois.outputs.mois }}
           restore-keys: routes-calmes-v2-
+      - name: Cache des derniers exemples (conserves si OSM / Geofabrik est injoignable)
+        uses: actions/cache@v4
+        with:
+          path: app/public/data/exemples.geojson
+          key: exemples-v1-${{ github.run_id }}
+          restore-keys: exemples-v1-
       - name: Outil osmium pour les extraits OSM (routes calmes, exemples d'amenagement)
         run: sudo apt-get install -y -q osmium-tool
       - name: Pipeline (telechargement, assemblage, export)

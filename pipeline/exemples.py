@@ -296,6 +296,7 @@ def reseaux_geofabrik(emprises, deps, lieux_out=None):
     plan = regions_pour(deps)
     log(f"  reseaux OSM : {len(plan)} regions a lire ({', '.join(sorted(plan))})")
     morceaux = defaultdict(list)
+    echecs = 0
     with tempfile.TemporaryDirectory() as tmp:
         for nom, epcis in plan.items():
             pbf = None
@@ -308,6 +309,9 @@ def reseaux_geofabrik(emprises, deps, lieux_out=None):
                     (Path(tmp) / f"{nom}.osm.pbf").unlink(missing_ok=True)
                     time.sleep(15 * essai)
             if pbf is None:
+                echecs += 1
+                if echecs >= 2 and not morceaux:  # Geofabrik injoignable : inutile d'attendre les autres regions
+                    raise RuntimeError("Geofabrik injoignable")
                 continue
             for epci in epcis:
                 g = extraire_reseau(pbf, emprises[epci], tmp, f"{nom}_{epci}")
@@ -755,7 +759,8 @@ def generer():
         try:
             reseaux = reseaux_geofabrik(emprises, deps, lieux)
         except Exception as e:  # noqa: BLE001
-            log(f"  [!] extraits Geofabrik indisponibles ({type(e).__name__} {e}) : repli sur Overpass")
+            log(f"  [!] extraits Geofabrik indisponibles ({type(e).__name__} {e}) : exemples non regeneres (les derniers exemples en cache sont conserves)")
+            return
     else:
         log("  osmium absent : repli sur Overpass (public, limite en debit)")
     lieux = {k: pd.concat(v, ignore_index=True) for k, v in lieux.items()}
